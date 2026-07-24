@@ -1,8 +1,11 @@
 """LM Studio process lifecycle helpers."""
 
+import logging
 import shutil
 import subprocess
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class LMStudioUnloadError(RuntimeError):
