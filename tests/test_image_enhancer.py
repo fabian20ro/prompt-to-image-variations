@@ -108,6 +108,23 @@ class TestGetEnhancer:
         module_seedvr2.SeedVR2.assert_called_once_with(quantize=8)
         assert result.tiling_config is None
 
+    @patch("image_enhancer._enhancer_cache", {})
+    def test_get_enhancer_preserves_tiling_when_enabled(self):
+        """Test that tiled_vae=True preserves the default tiling config."""
+        mock_instance = MagicMock()
+        original_tiling = MagicMock()
+        mock_instance.tiling_config = original_tiling
+
+        module_seedvr2 = ModuleType("mflux.models.seedvr2.variants.upscale.seedvr2")
+        module_seedvr2.SeedVR2 = MagicMock(return_value=mock_instance)
+
+        with patch.dict(sys.modules, {
+            "mflux.models.seedvr2.variants.upscale.seedvr2": module_seedvr2,
+        }):
+            result = _get_enhancer(tiled_vae=True)
+
+        assert result.tiling_config is original_tiling
+
 
 class TestEnhanceImage:
     """Tests for single image enhancement."""
