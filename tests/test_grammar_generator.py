@@ -123,6 +123,21 @@ class TestGrammarTools(unittest.TestCase):
         expected = '{"key": "val"}'
         self.assertEqual(clean_grammar_output(input_str), expected)
 
+    def test_clean_grammar_output_handles_thinking_block_only(self):
+        # When LM Studio emits a thinking block but no JSON payload at all,
+        # clean_grammar_output must strip the block and return empty so callers
+        # can distinguish "no grammar" from a malformed one.
+        input_str = '<think>some thought</think>'
+        expected = ''
+        self.assertEqual(clean_grammar_output(input_str), expected)
+
+    def test_clean_grammar_output_handles_thinking_block_with_whitespace(self):
+        # A thinking block followed by only whitespace must also normalize to empty,
+        # not a string of spaces that would confuse JSON parsing downstream.
+        input_str = '<think>thought</think>   \n\t  '
+        expected = ''
+        self.assertEqual(clean_grammar_output(input_str), expected)
+
     def test_hash_prompt(self):
         prompt = "a beautiful sunset"
         h1 = hash_prompt(prompt)
@@ -336,6 +351,24 @@ class TestApiRoot(unittest.TestCase):
         self.assertEqual(
             _api_root("https://lmstudio.example.com"),
             "https://lmstudio.example.com",
+        )
+
+    def test_strips_trailing_slash_from_non_v1_url(self):
+        # A URL ending with a non-v1 suffix (e.g. /v2/) must still have its trailing
+        # slash stripped so callers produce clean LM Studio roots; _api_root treats
+        # any trailing slash uniformly regardless of the path segment before it.
+        self.assertEqual(
+            _api_root("http://localhost:1234/v2/"),
+            "http://localhost:1234/v2",
+        )
+
+    def test_strips_multiple_trailing_slashes_from_non_v1_url(self):
+        # When LM Studio returns a URL with multiple trailing slashes (e.g.
+        # http://host/v2//), _api_root must collapse them to a single root so the
+        # subsequent /api/v1/... append does not produce double-slash paths.
+        self.assertEqual(
+            _api_root("http://localhost:1234/v2//"),
+            "http://localhost:1234/v2",
         )
 
 

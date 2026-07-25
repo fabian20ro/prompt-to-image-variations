@@ -108,6 +108,23 @@ class TestGetEnhancer:
         module_seedvr2.SeedVR2.assert_called_once_with(quantize=8)
         assert result.tiling_config is None
 
+    @patch("image_enhancer._enhancer_cache", {})
+    def test_get_enhancer_preserves_tiling_when_enabled(self):
+        """Test that tiled_vae=True preserves the default tiling config."""
+        mock_instance = MagicMock()
+        original_tiling = MagicMock()
+        mock_instance.tiling_config = original_tiling
+
+        module_seedvr2 = ModuleType("mflux.models.seedvr2.variants.upscale.seedvr2")
+        module_seedvr2.SeedVR2 = MagicMock(return_value=mock_instance)
+
+        with patch.dict(sys.modules, {
+            "mflux.models.seedvr2.variants.upscale.seedvr2": module_seedvr2,
+        }):
+            result = _get_enhancer(tiled_vae=True)
+
+        assert result.tiling_config is original_tiling
+
 
 class TestEnhanceImage:
     """Tests for single image enhancement."""
@@ -262,6 +279,32 @@ class TestCollectImages:
         """Test error when glob matches no images."""
         with pytest.raises(ValueError, match="No images found matching pattern"):
             collect_images(str(temp_dir / "*.xyz"))
+
+    def test_collect_uppercase_extensions(self, temp_dir):
+        """Test that uppercase image extensions are detected in all code paths."""
+        img = Image.new("RGB", (10, 10))
+        png_path = temp_dir / "test.PNG"
+        jpg_path = temp_dir / "photo.JPG"
+        webp_path = temp_dir / "image.WEBP"
+        img.save(png_path)
+        img.save(jpg_path)
+        img.save(webp_path)
+
+        # Single file path
+        assert collect_images(str(png_path)) == [png_path]
+
+        # Directory scan - verifies case-insensitive glob in production code (line 159-160)
+        result = collect_images(str(temp_dir))
+        names = {r.name for r in result}
+        assert "test.PNG" in names
+        assert "photo.JPG" in names
+        assert "image.WEBP" in names
+
+        # Glob pattern with uppercase extension - exercises the .upper() normalization (line 169)
+        result = collect_images(str(temp_dir / "*.PNG"))
+        assert len(result) == 1
+        assert result[0] == png_path
+
 
 def test_enhance_image_scale_factor_missing_raises_import_error(temp_dir):
     """Test that missing ScaleFactor triggers install-hint ImportError."""
