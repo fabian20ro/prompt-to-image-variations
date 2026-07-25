@@ -199,6 +199,15 @@ class TestMetadataManager:
         assert result.exists()
         assert nested.exists()
 
+    def test_save_atomic_write(self, temp_dir):
+        """Test that save uses atomic write (tempfile + os.replace)."""
+        from unittest.mock import patch as mock_patch
+        data = {"prefix": "test", "count": 5}
+
+        with mock_patch("metadata_manager.os.replace") as replace_mock:
+            result = MetadataManager.save(temp_dir, data)
+            replace_mock.assert_called_once()
+
     def test_update(self, temp_dir):
         """Test updating specific fields."""
         initial = {"prefix": "test", "count": 5, "user_prompt": "original"}
@@ -293,7 +302,7 @@ class TestMetadataManager:
         initial = {"prefix": "test", "count": 5}
         (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
 
-        with pytest.raises((TypeError, ValueError)):
+        with pytest.raises(TypeError):
             MetadataManager.update(temp_dir, count={"nested": "value"})
 
         saved = json.loads((temp_dir / "test.metaprompt.json").read_text())

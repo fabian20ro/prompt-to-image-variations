@@ -109,6 +109,20 @@ class TestUnloadAllModels:
                 unload_all_models()
             assert "unknown error" in str(exc_info.value)
 
+    def test_stderr_takes_precedence_over_stdout_on_failure(self):
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stderr = "error from stderr"
+        fail_result.stdout = "output from stdout"
+
+        with patch("lm_studio.shutil.which", return_value="/usr/bin/lms"), \
+             patch("lm_studio.subprocess.run", return_value=fail_result), \
+             patch("lm_studio.time.sleep"):
+            with pytest.raises(LMStudioUnloadError) as exc_info:
+                unload_all_models()
+            assert "error from stderr" in str(exc_info.value)
+            assert "output from stdout" not in str(exc_info.value)
+
     def test_backoff_sleep_values_on_retry(self):
         fail_result = MagicMock()
         fail_result.returncode = 1

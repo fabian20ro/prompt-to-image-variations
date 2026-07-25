@@ -7,6 +7,8 @@ the codebase.
 
 import json
 import logging
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -229,7 +231,15 @@ class MetadataManager:
 
         try:
             run_dir.mkdir(parents=True, exist_ok=True)
-            meta_file.write_text(json.dumps(data, indent=2))
+            fd, tmp_path = tempfile.mkstemp(prefix=f".{meta_file.name}.", dir=str(run_dir))
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_path, meta_file)
+            except BaseException:
+                if Path(tmp_path).exists():
+                    Path(tmp_path).unlink()
+                raise
             return meta_file
         except OSError as e:
             raise MetadataError(f"Failed to save metadata file: {e}")
