@@ -338,6 +338,24 @@ class TestApiRoot(unittest.TestCase):
             "https://lmstudio.example.com",
         )
 
+    def test_strips_trailing_slash_from_non_v1_url(self):
+        # A URL ending with a non-v1 suffix (e.g. /v2/) must still have its trailing
+        # slash stripped so callers produce clean LM Studio roots; _api_root treats
+        # any trailing slash uniformly regardless of the path segment before it.
+        self.assertEqual(
+            _api_root("http://localhost:1234/v2/"),
+            "http://localhost:1234/v2",
+        )
+
+    def test_strips_multiple_trailing_slashes_from_non_v1_url(self):
+        # When LM Studio returns a URL with multiple trailing slashes (e.g.
+        # http://host/v2//), _api_root must collapse them to a single root so the
+        # subsequent /api/v1/... append does not produce double-slash paths.
+        self.assertEqual(
+            _api_root("http://localhost:1234/v2//"),
+            "http://localhost:1234/v2",
+        )
+
 
 class TestEmptyPromptGuardMessages(unittest.TestCase):
     """Tests for exact error messages from empty/whitespace prompt rejection."""
