@@ -384,3 +384,107 @@ class TestExtraFieldHandling:
 
         with pytest.raises(ValidationError):
             EnhanceAllImagesRequest(softness=0.5, bogus_key="ignored")
+
+
+class TestGalleryLayoutUpdateRequest:
+    """Tests for GalleryLayoutUpdateRequest model defaults and validation."""
+
+    def test_gallery_layout_defaults(self):
+        """Test GalleryLayoutUpdateRequest with default values."""
+        from pydantic import ValidationError
+
+        req = GalleryLayoutUpdateRequest()
+        assert req.images_per_prompt == 1
+        assert req.max_prompts is None
+
+    def test_gallery_layout_max_prompts_upper_bound(self):
+        """Test that max_prompts upper bound is respected (no le= limit in model)."""
+        req = GalleryLayoutUpdateRequest(max_prompts=9999)
+        assert req.max_prompts == 9999
+
+
+class TestGenerateAllImagesRequest:
+    """Tests for GenerateAllImagesRequest field validation."""
+
+    def test_generate_all_images_defaults(self):
+        """Test GenerateAllImagesRequest with default values."""
+        from pydantic import ValidationError
+
+        req = GenerateAllImagesRequest()
+        assert req.images_per_prompt == 1
+        assert req.resume is True
+        assert req.width is None
+        assert req.height is None
+        assert req.enhance is False
+        assert req.enhance_softness == 0.5
+
+    def test_generate_all_images_dimensions_bounds(self):
+        """Test that width/height must be within bounds."""
+        from pydantic import ValidationError
+
+        # Too small
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(width=32)
+
+        # Too large
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(height=5000)
+
+        # Just right
+        req = GenerateAllImagesRequest(width=512, height=768)
+        assert req.width == 512
+        assert req.height == 768
+
+    def test_generate_all_images_seed_validation(self):
+        """Test that seed must be non-negative."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(seed=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = GenerateAllImagesRequest(seed=0)
+        assert req.seed == 0
+
+    def test_generate_all_images_enhance_softness_bounds(self):
+        """Test that enhance_softness must be within 0-1."""
+        from pydantic import ValidationError
+
+        # Too low
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(enhance_softness=-0.1)
+
+        # Too high
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(enhance_softness=1.5)
+
+        # Just right
+        req = GenerateAllImagesRequest(enhance_softness=0.7)
+        assert req.enhance_softness == 0.7
+
+    def test_generate_all_images_images_per_prompt_bounds(self):
+        """Test that images_per_prompt must be within bounds."""
+        from pydantic import ValidationError
+
+        # Too low (ge=0, so -1 should fail)
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(images_per_prompt=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = GenerateAllImagesRequest(images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
+        # Too high
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(images_per_prompt=101)
+
+    def test_generate_all_images_max_prompts_lower_bound(self):
+        """Test that max_prompts must be >= 1."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(max_prompts=0)
+
+        # Just right
+        req = GenerateAllImagesRequest(max_prompts=50)
+        assert req.max_prompts == 50
