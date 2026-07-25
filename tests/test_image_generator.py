@@ -212,6 +212,24 @@ def test_generate_image_creates_output_parent_directory(mock_unload, mock_get_mo
     assert parent.is_dir()
 
 
+@patch("image_generator._get_model")
+@patch("image_generator.unload_all_models")
+def test_generate_image_propagates_file_not_found_when_model_missing(
+    mock_unload, mock_get_model, temp_dir
+):
+    """When the model is missing, generate_image must surface FileNotFoundError
+    without leaving dangling state or generating images."""
+    mock_get_model.side_effect = FileNotFoundError(
+        "ERNIE q4 model not found: /fake/path"
+    )
+
+    with pytest.raises(FileNotFoundError, match="ERNIE q4 model not found"):
+        generate_image("test", temp_dir / "image.png")
+
+    mock_unload.assert_called_once_with()
+    assert mock_get_model.return_value.generate_image.call_count == 0
+
+
 @patch("image_generator.settings")
 @patch("image_generator._model_cache", {})
 def test_get_model_skips_tiling_by_default(mock_settings, temp_dir):
