@@ -378,6 +378,19 @@ class TestMetadataManager:
         settings = MetadataManager.get_image_settings(temp_dir)
         assert settings == {}
 
+    def test_get_gallery_layout_missing_metadata(self, temp_dir):
+        """Test get_gallery_layout returns deterministic defaults when metadata is absent.
+
+        When no metadata file exists the load path raises MetadataNotFoundError;
+        the fallback must resolve to concrete values — not None or empty — so callers
+        can safely use them for layout decisions without further guard checks.
+        """
+        layout = MetadataManager.get_gallery_layout(temp_dir, prompt_count=3)
+
+        assert isinstance(layout, dict), "fallback must return a dict"
+        assert layout["images_per_prompt"] == 1
+        assert layout["max_prompts"] is None
+
     def test_resolve_gallery_layout_preserves_explicit_zero_images_per_prompt(self):
         """Explicit zero-image layouts should survive normalization."""
         metadata = {
