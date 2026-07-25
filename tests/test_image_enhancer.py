@@ -280,6 +280,32 @@ class TestCollectImages:
         with pytest.raises(ValueError, match="No images found matching pattern"):
             collect_images(str(temp_dir / "*.xyz"))
 
+    def test_collect_uppercase_extensions(self, temp_dir):
+        """Test that uppercase image extensions are detected in all code paths."""
+        img = Image.new("RGB", (10, 10))
+        png_path = temp_dir / "test.PNG"
+        jpg_path = temp_dir / "photo.JPG"
+        webp_path = temp_dir / "image.WEBP"
+        img.save(png_path)
+        img.save(jpg_path)
+        img.save(webp_path)
+
+        # Single file path
+        assert collect_images(str(png_path)) == [png_path]
+
+        # Directory scan - verifies case-insensitive glob in production code (line 159-160)
+        result = collect_images(str(temp_dir))
+        names = {r.name for r in result}
+        assert "test.PNG" in names
+        assert "photo.JPG" in names
+        assert "image.WEBP" in names
+
+        # Glob pattern with uppercase extension - exercises the .upper() normalization (line 169)
+        result = collect_images(str(temp_dir / "*.PNG"))
+        assert len(result) == 1
+        assert result[0] == png_path
+
+
 def test_enhance_image_scale_factor_missing_raises_import_error(temp_dir):
     """Test that missing ScaleFactor triggers install-hint ImportError."""
     from image_enhancer import enhance_image
