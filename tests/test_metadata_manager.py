@@ -293,7 +293,7 @@ class TestMetadataManager:
         initial = {"prefix": "test", "count": 5}
         (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
 
-        with pytest.raises((TypeError, ValueError)):
+        with pytest.raises(TypeError):
             MetadataManager.update(temp_dir, count={"nested": "value"})
 
         saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
