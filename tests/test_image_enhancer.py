@@ -367,6 +367,20 @@ def test_enhance_image_invalid_height(height):
             enhance_image(img_path, out_path, width=800, height=height)
 
 
+@pytest.mark.parametrize("width,height", [(0, -4), (-5, 7), (9, 3)])
+def test_enhance_image_both_invalid_dimensions(width, height):
+    """Test that simultaneous invalid width and height raise ValueError."""
+    from image_enhancer import enhance_image
+    from PIL import Image
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+        with pytest.raises(ValueError):
+            enhance_image(img_path, out_path, width=width, height=height)
+
+
 def test_enhance_image_valid_dimensions_pass():
     from image_enhancer import enhance_image
     from unittest.mock import MagicMock, patch
