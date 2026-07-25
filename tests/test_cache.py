@@ -512,6 +512,36 @@ def test_get_cached_raw_response_independent_of_grammar_file(tmp_path, monkeypat
     assert retrieved == raw_content
 
 
+def test_get_cached_grammar_returns_corrupt_content_as_is(tmp_path, monkeypatch):
+    """get_cached_grammar must return file content verbatim even when it is not valid JSON.
+
+    The getter reads the cache file with ``Path.read_text()`` and does NOT validate
+    the contents as JSON — callers are responsible for downstream validation via
+    ``validate_grammar_structure()``. This behaviour lets a crash-mid-write scenario
+    (e.g., power loss leaving a truncated grammar) surface silently rather than raise,
+    so that ``generate_grammar`` can decide whether to regenerate or accept the partial
+    data without the cache layer itself failing loudly.
+
+    A ValueError here would be a regression: callers currently rely on the getter
+    being non-throwing and returning whatever bytes happen to be on disk.
+    """
+    mock_cache_dir = tmp_path / "grammars"
+    mock_cache_dir.mkdir()
+    monkeypatch.setattr("src.grammar_generator.CACHE_DIR", mock_cache_dir)
+
+    prompt_hash = "corrupt_grammar_test"
+    corrupt_content = '{"origin": ["#a#", "#b#"'  # truncated — not valid JSON
+
+    # Write a deliberately malformed grammar file (simulate crash mid-write)
+    (mock_cache_dir / f"{prompt_hash}.tracery.json").write_text(corrupt_content)
+
+    # Act: read it back through the public getter
+    retrieved = get_cached_grammar(prompt_hash)
+
+    # Assert: returns the raw content verbatim — no JSON validation, no exception
+    assert retrieved == corrupt_content
+
+
 def test_get_cached_grammar_returns_none_for_missing_file(tmp_path, monkeypatch):
     """Confirm cache miss behavior when no files exist for a hash."""
     mock_cache_dir = tmp_path / "grammars"
