@@ -359,6 +359,38 @@ def test_api_root_handles_https_and_slash():
     assert grammar_gen._api_root("https://example.com/v1/") == "https://example.com"
 
 
+def test_api_root_collapse_double_slash_before_v1():
+    """A double-slash before /v1 must collapse to a clean host root.
+
+    The docstring states ``http://host//v1`` → ``http://host`` — the trailing-slash
+    chain (strip → strip /v1 suffix → strip trailing slash) relies on the middle
+    slash being absorbed by the final rstrip, so we assert it explicitly to prevent
+    future refactors from breaking this implicit contract.
+    """
+    assert grammar_gen._api_root("http://localhost:1234//v1/") == "http://localhost:1234"
+
+
+def test_api_root_collapse_double_slash_no_trailing():
+    """``http://host//v1`` without a trailing slash must also collapse correctly."""
+    assert grammar_gen._api_root("http://localhost:1234//v1") == "http://localhost:1234"
+
+
+def test_api_root_handles_https_double_slash_and_v1():
+    """HTTPS URLs with double slashes and /v1 suffix must round-trip cleanly."""
+    assert grammar_gen._api_root("https://example.com//v1/") == "https://example.com"
+
+
+def test_api_root_preserves_trailing_path_after_v1():
+    """A path that follows /v1 (non-standard) must NOT be stripped — only a trailing ``/v1`` suffix is removed.
+
+    The function strips the *trailing* ``/v1`` suffix; any content after it stays in
+    place so callers can rely on partial stripping rather than full normalization.
+    This test confirms that ``http://host/v1/chat`` round-trips unchanged because
+    ``chat`` is not itself a trailing /v1 marker to remove.
+    """
+    assert grammar_gen._api_root("http://localhost:1234/v1/chat") == "http://localhost:1234/v1/chat"
+
+
 def test_get_cached_raw_response_hit():
     """Cache hit: raw response file exists and can be read back exactly."""
     prompt_hash = "raw_hit_test"
