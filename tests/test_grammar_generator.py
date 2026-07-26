@@ -600,6 +600,25 @@ class TestGrammarStructureValidation(unittest.TestCase):
                 "subject": "fox",
             })
 
+    def test_rejects_invalid_rule_name_with_spaces(self):
+        # Rule names containing spaces (e.g. "#my rule#" references) cannot be
+        # resolved by Tracery — validate_grammar_structure must reject them early
+        # so the error message is clear instead of confusing "missing rules" noise.
+        with self.assertRaisesRegex(ValueError, "invalid"):
+            validate_grammar_structure({
+                "origin": ["A #my rule#."],
+                "my rule": ["fox", "owl", "hare", "badger", "deer"],
+            })
+
+    def test_rejects_rule_name_starting_with_digit(self):
+        # Rule names starting with digits cannot be referenced via Tracery syntax;
+        # the validator must reject them to prevent silent failures downstream.
+        with self.assertRaisesRegex(ValueError, "invalid"):
+            validate_grammar_structure({
+                "origin": ["A #1subject#."],
+                "1subject": ["fox", "owl", "hare", "badger", "deer"],
+            })
+
 
 if __name__ == "__main__":
     unittest.main()

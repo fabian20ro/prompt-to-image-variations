@@ -248,10 +248,16 @@ def validate_grammar_structure(grammar: object) -> None:
     if len(grammar) > 8:
         raise ValueError("Grammar must contain at most 8 rules")
 
+    _RULE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     varying_rules = 0
     for name, options in grammar.items():
         if not isinstance(name, str) or not isinstance(options, list) or not options:
             raise ValueError(f"Grammar rule {name!r} must be a non-empty array")
+        if not _RULE_NAME_RE.match(name):
+            raise ValueError(
+                f"Grammar rule name {name!r} is invalid; "
+                f"rule names must match [A-Za-z_][A-Za-z0-9_]*"
+            )
         if not all(isinstance(option, str) and option.strip() for option in options):
             raise ValueError(f"Grammar rule {name!r} must contain non-empty strings")
         if len(set(options)) != len(options):
