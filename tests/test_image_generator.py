@@ -1,6 +1,7 @@
 """Tests for the fixed ERNIE-Image-Turbo generator."""
 
 import sys
+import re
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
@@ -210,9 +211,20 @@ def test_generate_image_random_seed_and_tiling(mock_unload, mock_get_model, temp
     assert mock_get_model.return_value.generate_image.call_args.kwargs["seed"] == 123
 
 
-@pytest.mark.parametrize("width,height", [(-1, 512), (512, 0), (511, 512), (512, 513)])
-def test_generate_image_rejects_invalid_dimensions(temp_dir, width, height):
-    with pytest.raises(ValueError):
+@pytest.mark.parametrize(
+    "width,height,error_msg",
+    [
+        (-1, 512, "Width and height must be positive."),
+        (512, 0, "Width and height must be positive."),
+        (511, 512, "Width and height must be multiples of 8."),
+        (512, 513, "Width and height must be multiples of 8."),
+    ],
+)
+def test_generate_image_rejects_invalid_dimensions(
+    temp_dir, width, height, error_msg
+):
+    """Invalid dimensions must raise ValueError with the specific message."""
+    with pytest.raises(ValueError, match=re.escape(error_msg)):
         generate_image("test", temp_dir / "image.png", width=width, height=height)
 
 
