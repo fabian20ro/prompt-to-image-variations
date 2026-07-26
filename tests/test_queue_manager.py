@@ -430,3 +430,36 @@ class TestGetTask:
         found = qm.get_task("nonexistent-id")
 
         assert found is None
+
+
+class TestGetCurrentTaskPid:
+    """Tests for QueueManager.get_current_task_pid."""
+
+    def test_get_current_task_pid_returns_pid(self, queue_path):
+        """get_current_task_pid should return the PID when a task is running."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+        task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test"})
+        qm.get_next_task()
+        qm.update_task_pid(task.id, 4242)
+
+        # Ignore add/get notifications
+        events.clear()
+
+        pid = qm.get_current_task_pid()
+
+        assert pid == 4242
+        assert len(events) == 0
+
+    def test_get_current_task_pid_no_running(self, queue_path):
+        """get_current_task_pid should return None when no task is running."""
+        qm = QueueManager(queue_path)
+
+        pid = qm.get_current_task_pid()
+
+        assert pid is None
