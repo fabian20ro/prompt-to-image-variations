@@ -379,6 +379,64 @@ class TestCliEnhanceImages:
         assert "Using cached grammar" in result.output
         assert '{"origin": ["cached_cat"]}' in result.output
 
+    def test_enhance_images_success(self, tmp_path):
+        """Test --enhance-images invokes enhancement for each image and prints summary."""
+        from pathlib import Path
+
+        fake_img1 = tmp_path / "test_0.png"
+        fake_img2 = tmp_path / "test_1.png"
+        fake_img1.touch()
+        fake_img2.touch()
+
+        class MockProgressBar:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def __iter__(self):
+                for item in [fake_img1, fake_img2]: yield item
+            def write(self, s): pass
+
+        with patch("cli.collect_images", return_value=[fake_img1, fake_img2]), \
+             patch("cli.enhance_image") as mock_enhance, \
+             patch("click.progressbar", MockProgressBar):
+            runner = CliRunner()
+            result = runner.invoke(main, ["--enhance-images", "/some/path"])
+
+            assert result.exit_code == 0
+            assert "Collecting images from: /some/path" in result.output
+            assert "Enhanced 2 images" in result.output
+            assert mock_enhance.call_count == 2
+            # Seed is None by default, so no seed increment expected
+            for call in mock_enhance.call_args_list:
+                kwargs = call.kwargs if hasattr(call, 'kwargs') else call[1]
+                assert kwargs.get("seed") is None
+
+    def test_enhance_images_seed_increments(self, tmp_path):
+        """Test --enhance-images increments seed per image when provided."""
+        from pathlib import Path
+
+        fake_img = tmp_path / "test.png"
+        fake_img.touch()
+
+        class MockProgressBar:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def __iter__(self):
+                for item in [fake_img] * 3: yield item
+            def write(self, s): pass
+
+        with patch("cli.collect_images", return_value=[fake_img] * 3), \
+             patch("cli.enhance_image") as mock_enhance, \
+             patch("click.progressbar", MockProgressBar):
+            runner = CliRunner()
+            result = runner.invoke(main, ["--enhance-images", "/some/path", "--seed", "42"])
+
+            assert result.exit_code == 0
+            # Verify seed increments across calls: 42, 43, 44
+            seeds = [call.kwargs.get("seed") for call in mock_enhance.call_args_list]
+            assert seeds == [42, 43, 44]
+
 
 class TestStdinPrompt:
     """Tests for --prompt - (read prompt from stdin)."""
