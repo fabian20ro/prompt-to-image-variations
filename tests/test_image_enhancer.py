@@ -587,6 +587,30 @@ def test_enhance_image_user_seed_propagates_to_generate_image():
         assert call_kwargs["seed"] == 42
 
 
+def test_enhance_image_zero_seed_not_randomized():
+    """Test that seed=0 is passed through unchanged (not replaced by random)."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path, seed=0)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["seed"] == 0
+
+
 def test_enhance_image_resolution_always_scale_factor_2():
     """Test that resolution is always ScaleFactor(2) regardless of other kwargs."""
     from image_enhancer import enhance_image
