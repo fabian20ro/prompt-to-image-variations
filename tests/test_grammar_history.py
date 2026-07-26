@@ -262,6 +262,44 @@ class TestAppendGrammarRotation:
         history = append_grammar_revision(run_dir, "test", grammar="final", action="update", max_revisions=0)
         assert len(history) == 6
 
+    def test_negative_max_revisions_causes_unexpected_trimming(self, run_dir):
+        """Negative max_revisions is truthy in Python → slicing becomes `history[1:]`.
+
+        The rotation guard at line 80 uses bare `if max_revisions`, which treats any
+        non-zero value as true. A negative value passes the guard and then slices
+        the history starting from index 1 (dropping the first entry). This test
+        characterizes that current behavior so callers know to validate their input.
+        """
+        append_grammar_revision(run_dir, "test", grammar="rule_a", action="initial")
+        append_grammar_revision(run_dir, "test", grammar="rule_b", action="update")
+        history = append_grammar_revision(
+            run_dir, "test", grammar="rule_c", action="update", max_revisions=-1
+        )
+        # history[-(-1):] == history[1:] — first entry is dropped
+        assert len(history) == 2
+        assert history[0]["grammar"] == "rule_b"
+
+    def test_empty_valid_json_on_disk_appends_first_revision(self, run_dir):
+        """Valid empty JSON array on disk → load returns [] → last=None → append proceeds.
+
+        Characterizes that an existing file containing `[]` is treated as "no usable
+        history": the dedup gate sees `last = None`, so the first real revision still
+        gets appended rather than being dropped by a missing-file fallback path.
+        """
+        import json
+        from grammar_history import _history_path
+
+        history_path = _history_path(run_dir, "empty_array")
+        history_path.write_text("[]")  # valid empty list on disk
+
+        history = append_grammar_revision(
+            run_dir, "empty_array", grammar="rule_first", action="initial"
+        )
+        assert len(history) == 1
+        assert history[0]["id"] != "initial"  # not the synthetic initial id
+        assert history[0]["action"] == "initial"
+        assert history[0]["grammar"] == "rule_first"
+
     def test_rotation_persists_to_disk(self, run_dir):
         for i in range(10):
             append_grammar_revision(run_dir, "test", grammar=f"rule_{i}", action="update")
