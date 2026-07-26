@@ -470,6 +470,18 @@ class TestGetRecentRevisions:
         result = get_recent_revisions([], n=5)
         assert result == []
 
+    def test_empty_history_with_include_action_and_positive_n(self):
+        """Empty history + include_action=True + positive n exercises both branches.
+
+        Characterizes the cross-branch contract: `history[-n:]` on an empty list
+        yields [], then the reduction branch iterates over zero entries — producing
+        []. This locks in that include_action does not crash or behave differently
+        when the sliced result is empty, so future refactors cannot gate it behind
+        a non-empty guard.
+        """
+        result = get_recent_revisions([], n=5, include_action=True)
+        assert result == []
+
     def test_n_exceeds_history_length_returns_all_entries(self):
         """When n > len(history), slicing returns all entries — Python's slice
         underflow is graceful, not an error.
