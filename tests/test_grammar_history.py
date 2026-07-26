@@ -431,3 +431,40 @@ class TestGetRecentRevisions:
         """Empty input must yield empty output regardless of n."""
         result = get_recent_revisions([], n=5)
         assert result == []
+
+    def test_n_exceeds_history_length_returns_all_entries(self):
+        """When n > len(history), slicing returns all entries — Python's slice
+        underflow is graceful, not an error.
+
+        Characterizes the `history[-n:]` gate at line 104: callers may pass a
+        generous n (e.g., max_revisions=10) on a small history without triggering
+        IndexError or truncation surprises. This test locks in that the function
+        returns every available entry rather than raising or returning [].
+        """
+        history = [
+            {"id": "a", "action": "init", "grammar": "g_a"},
+            {"id": "b", "action": "update", "grammar": "g_b"},
+            {"id": "c", "action": "update", "grammar": "g_c"},
+        ]
+        result = get_recent_revisions(history, n=10)
+        assert len(result) == 3
+        assert [e["id"] for e in result] == ["a", "b", "c"]
+
+    def test_n_exceeds_history_with_include_action(self):
+        """include_action=True with n > len(history) must still reduce every entry.
+
+        Verifies the cross-branch contract: when slicing returns all entries
+        (because n exceeds history length), the action-only reduction applies
+        uniformly to every returned dict — not just a truncated slice. This
+        locks in that the include_action branch is independent of how many
+        entries were sliced, so future refactors cannot gate it behind an
+        n <= len(history condition.
+        """
+        history = [
+            {"id": "a", "action": "init", "grammar": "g_a"},
+            {"id": "b", "action": "update", "grammar": "g_b"},
+        ]
+        result = get_recent_revisions(history, n=100, include_action=True)
+        assert len(result) == 2
+        for entry in result:
+            assert set(entry.keys()) == {"action"}
