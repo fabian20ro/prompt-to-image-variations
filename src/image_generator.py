@@ -66,11 +66,14 @@ def generate_image(
     prompt: str,
     output_path: Path,
     seed: int | None = None,
-    width: int = 864,
-    height: int = 1152,
+    width: int | None = None,
+    height: int | None = None,
     tiled_vae: bool = False,
 ) -> Path:
     """Generate one image with fixed ERNIE-Image-Turbo q4 settings."""
+    width = width if width is not None else settings.image_generation.default_width
+    height = height if height is not None else settings.image_generation.default_height
+
     if width <= 0 or height <= 0:
         raise ValueError("Width and height must be positive.")
     if width % 8 != 0 or height % 8 != 0:
