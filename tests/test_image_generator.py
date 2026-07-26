@@ -118,9 +118,48 @@ def test_get_model_import_error_when_mflux_missing(mock_settings, monkeypatch):
         _get_model()
 
 
+@patch("image_generator.settings")
+@patch("image_generator._get_model")
+@patch("image_generator.unload_all_models")
+def test_generate_image_uses_settings_defaults(mock_unload, mock_get_model, mock_settings, temp_dir):
+    """When no explicit width/height given, generate_image must use settings defaults."""
+    generated = MagicMock()
+    model = MagicMock()
+    model.generate_image.return_value = generated
+    mock_get_model.return_value = model
+
+    # Configure the mock settings with non-default values.
+    mock_settings.image_generation.default_width = 256
+    mock_settings.image_generation.default_height = 256
+
+    result = generate_image("test", temp_dir / "image.png")
+
+    call_kwargs = mock_get_model.return_value.generate_image.call_args.kwargs
+    assert call_kwargs["width"] == 256
+    assert call_kwargs["height"] == 256
+
+
+@patch("image_generator._get_model")
+@patch("image_generator.unload_all_models")
+def test_generate_image_explicit_width_overrides_settings(mock_unload, mock_get_model, temp_dir):
+    """Explicit width/height must override settings defaults."""
+    generated = MagicMock()
+    model = MagicMock()
+    model.generate_image.return_value = generated
+    mock_get_model.return_value = model
+
+    result = generate_image("test", temp_dir / "image.png", width=512, height=768)
+
+    call_kwargs = mock_get_model.return_value.generate_image.call_args.kwargs
+    assert call_kwargs["width"] == 512
+    assert call_kwargs["height"] == 768
+
+
+
 @patch("image_generator._get_model")
 @patch("image_generator.unload_all_models")
 def test_generate_image_uses_fixed_parameters(mock_unload, mock_get_model, temp_dir):
+    """Explicit width/height parameters must be forwarded to the model."""
     generated = MagicMock()
     model = MagicMock()
     model.generate_image.return_value = generated
