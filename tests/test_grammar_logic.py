@@ -282,3 +282,60 @@ def test_clean_grammar_output_smart_quotes_in_code_block():
     assert '\u201c' not in result and '\u201d' not in result
     expected = '{"key": "value"}'
     assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# hash_prompt — unicode, special chars, empty input (pure, no mocks needed)
+# ---------------------------------------------------------------------------
+
+def test_hash_prompt_unicode_input():
+    """Non-ASCII user prompts must still produce deterministic 12-char hex hashes."""
+    h = hash_prompt("a cat with 🐾 paws")
+    assert len(h) == 12 and all(c in "0123456789abcdef" for c in h)
+
+
+def test_hash_prompt_special_characters():
+    """Prompts containing quotes, newlines, or other special characters must hash consistently."""
+    h1 = hash_prompt('a "cat" with\nnewlines')
+    h2 = hash_prompt('a "cat" with\nnewlines')
+    assert h1 == h2 and len(h1) == 12
+
+
+def test_hash_prompt_empty_string():
+    """An empty user prompt must still produce a valid 12-char hash (not raise)."""
+    h = hash_prompt("")
+    assert len(h) == 12 and all(c in "0123456789abcdef" for c in h)
+
+
+def test_hash_prompt_differentiates_similar_prompts():
+    """Trivially similar prompts must produce different hashes."""
+    h_short = hash_prompt("a cat")
+    h_long = hash_prompt("a cat sitting on a mat")
+    assert h_short != h_long and len(h_short) == len(h_long) == 12
+
+
+# ---------------------------------------------------------------------------
+# get_system_prompt — explicit path, non-default location
+# ---------------------------------------------------------------------------
+
+def test_get_system_prompt_explicit_path(tmp_path):
+    """get_system_prompt must read from the supplied templates_dir (not only the default)."""
+    custom = tmp_path / "custom"
+    custom.mkdir()
+    prompt_file = custom / "system_prompt.txt"
+    content = "CUSTOM SYSTEM PROMPT CONTENT"
+    prompt_file.write_text(content)
+
+    result = get_system_prompt(templates_dir=custom)
+    assert result == content
+
+
+def test_get_system_prompt_default_uses_project_templates():
+    """Without an explicit path, the function must resolve to paths.templates_dir."""
+    # The default templates dir is relative to the project; verify it resolves correctly.
+    from grammar_generator import paths as gen_paths
+    expected_file = gen_paths.templates_dir / "system_prompt.txt"
+    if expected_file.exists():
+        content = expected_file.read_text()
+        result = get_system_prompt()  # default path
+        assert result == content
