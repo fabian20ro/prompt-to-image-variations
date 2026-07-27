@@ -146,3 +146,34 @@ def test_system_prompt_requires_hash_references():
     assert "square-bracket" in prompt or "[placeholder" in prompt, (
         "Square-bracket placeholder prohibition missing from system prompt"
     )
+
+
+def test_system_prompt_enforces_grammar_rule_format():
+    """Verify the template enforces Tracery grammar structural invariants.
+
+    The origin rule is the expansion entry point; without it no valid grammar can be generated.
+    Every rule value must be a non-empty array of strings so Tracery can expand them,
+    and every #rule# reference must resolve or generation would fail at runtime.
+    These are structural guarantees that protect downstream consumers from malformed grammars.
+    """
+    prompt = get_system_prompt()
+    for invariant in [
+        "non-empty array of strings",
+        "#rule# reference must resolve",
+        "\"origin\" rule",
+    ]:
+        assert (
+            invariant in prompt
+        ), f"Grammar structural invariant missing from system prompt: {invariant}"
+
+
+def test_system_prompt_limits_rule_count():
+    """Verify the template caps rule count at 8 to keep grammars compact and parseable.
+
+    Tracery grammars with too many rules degrade performance and become hard to debug;
+    the limit is enforced explicitly in the system prompt before generation begins.
+    """
+    prompt = get_system_prompt()
+    assert "at most 8 rules" in prompt, (
+        "Rule count cap missing from system prompt — grammars could balloon unbounded"
+    )
