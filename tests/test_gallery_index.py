@@ -477,6 +477,44 @@ class TestGalleryIndexInteractive:
         html = _build_card_html(run, interactive=False)
         assert "5 images" in html and "| 1 prompt" in html
 
+    def test_build_card_html_interactive_active_uses_gallery_route(self):
+        """Interactive active-card thumbnail and href must use /gallery/ route."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": "image_20240101_120000_0.png",
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=True)
+
+        assert "/gallery/20240101_120000_xxx/image_20240101_120000_0.png" in html
+        assert 'href="/gallery/20240101_120000_xxx"' in html
+
+    def test_build_card_html_non_interactive_active_uses_relative_path(self):
+        """Non-interactive active-card thumbnail and href must use relative paths."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": "prompts/20240101_120000_xxx/image.png",
+        }
+        html = _build_card_html(run, interactive=False)
+
+        assert 'src="prompts/20240101_120000_xxx/image.png"' in html
+        assert 'href="prompts/20240101_120000_xxx/test_gallery.html"' in html
+
     def test_build_flat_archive_card_singular_plural(self):
         """Flat archive card uses 'image' for 1, 'images' otherwise."""
         from gallery_index import _build_flat_archive_card_html
