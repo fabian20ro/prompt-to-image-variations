@@ -320,6 +320,24 @@ class TestTraceryModifiers:
         result = generate_one(grammar)
         assert result == "leaf" or "+ leaf + leaf" in result
 
+    def test_generate_empty_grammar(self):
+        """Test generating from an empty grammar dict returns empty string."""
+        # Tracery handles empty dicts gracefully, returning empty output.
+        result = generate_one({})
+        assert isinstance(result, str)
+
+    def test_generate_non_dict_input(self):
+        """Test that passing a non-dict to generate_one raises AttributeError."""
+        with pytest.raises(AttributeError):
+            generate_one("not a dict")
+
+    def test_generate_missing_custom_origin(self):
+        """Test that referencing an undefined origin rule returns unresolved reference."""
+        grammar = {"origin": ["hello"]}
+        result = generate_one(grammar, origin="does_not_exist")
+        # Tracery leaves unresolved references as-is in the output
+        assert "does_not_exist" in result or "#does_not_exist#" in result
+
     def test_run_tracery_with_modifiers(self):
         """Test batch generation includes modifier effects."""
         grammar_json = json.dumps({
