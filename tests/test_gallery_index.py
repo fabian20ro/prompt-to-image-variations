@@ -515,3 +515,21 @@ class TestGalleryIndexInteractive:
         }
         html = _build_flat_archive_card_html(archive, interactive=False)
         assert "0 images" in html
+
+    def test_build_active_archive_card_unknown_backup_reason(self):
+        """Active archive card renders 'Backup' label for unrecognized backup reason."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "saved/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+            "backup_reason": "some_obscure_reason",
+        }
+        html = _build_card_html(run, interactive=False, is_archive=True)
+        assert '<span class="archive-badge">Backup</span>' in html
