@@ -165,6 +165,33 @@ class TestWorkerKillCurrent:
         worker.queue_manager.cancel_task.assert_called()
         assert worker._current_process is None
 
+    @pytest.mark.asyncio
+    async def test_kill_current_no_active_task_in_queue(self, worker):
+        """Test kill_current() when queue state has no current task — cancel_task must not be called."""
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.terminate = MagicMock()
+        mock_process.kill = MagicMock()
+
+        async def mock_wait():
+            return 0
+
+        mock_process.wait = mock_wait
+
+        worker._current_process = mock_process
+        # Queue state reports no active task — the guard at worker.py:92 should skip cancel_task
+        worker.queue_manager.get_state.return_value = MockQueueState(current_task=None)
+
+        result = await worker.kill_current()
+
+        assert result is True
+        mock_process.terminate.assert_called_once()
+        # kill should NOT be called — graceful terminate succeeded
+        mock_process.kill.assert_not_called()
+        # cancel_task must not be called when there is no active task to cancel
+        worker.queue_manager.cancel_task.assert_not_called()
+        assert worker._current_process is None
+
 
 class TestWorkerReadStderr:
     """Tests for Worker._read_stderr() method."""
