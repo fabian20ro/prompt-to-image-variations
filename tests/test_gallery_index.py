@@ -442,3 +442,132 @@ class TestGalleryIndexInteractive:
         # The timestamp must be only the first two segments — a change to the split
         # logic should not silently start consuming later path components.
         assert result["timestamp"] == "20240101_100000"
+
+    def test_build_card_html_singular_plural_for_images(self):
+        """Active card uses 'image' for 1, 'images' otherwise."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 1,
+            "prompt_count": 3,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=False)
+        assert "1 image" in html and "| 3 prompts" in html
+
+    def test_build_card_html_singular_plural_for_prompts(self):
+        """Active card uses 'prompt' for 1, 'prompts' otherwise."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 5,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=False)
+        assert "5 images" in html and "| 1 prompt" in html
+
+    def test_build_card_html_interactive_active_uses_gallery_route(self):
+        """Interactive active-card thumbnail and href must use /gallery/ route."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": "image_20240101_120000_0.png",
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=True)
+
+        assert "/gallery/20240101_120000_xxx/image_20240101_120000_0.png" in html
+        assert 'href="/gallery/20240101_120000_xxx"' in html
+
+    def test_build_card_html_non_interactive_active_uses_relative_path(self):
+        """Non-interactive active-card thumbnail and href must use relative paths."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": "prompts/20240101_120000_xxx/image.png",
+        }
+        html = _build_card_html(run, interactive=False)
+
+        assert 'src="prompts/20240101_120000_xxx/image.png"' in html
+        assert 'href="prompts/20240101_120000_xxx/test_gallery.html"' in html
+
+    def test_build_flat_archive_card_singular_plural(self):
+        """Flat archive card uses 'image' for 1, 'images' otherwise."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 1,
+            "model": "test-model",
+            "first_image": None,
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert "1 image" in html
+
+    def test_build_flat_archive_card_plural(self):
+        """Flat archive card uses 'images' for counts other than 1."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 5,
+            "model": "test-model",
+            "first_image": None,
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert "5 images" in html and "images" in html
+
+    def test_build_flat_archive_card_zero_images(self):
+        """Flat archive card renders '0 images' (not '1 image')."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 0,
+            "model": "test-model",
+            "first_image": None,
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert "0 images" in html
+
+    def test_build_active_archive_card_unknown_backup_reason(self):
+        """Active archive card renders 'Backup' label for unrecognized backup reason."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "saved/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+            "backup_reason": "some_obscure_reason",
+        }
+        html = _build_card_html(run, interactive=False, is_archive=True)
+        assert '<span class="archive-badge">Backup</span>' in html
