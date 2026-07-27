@@ -710,7 +710,7 @@ def _build_card_html(run: dict, interactive: bool, is_archive: bool = False) -> 
         <div class="prompt" title="{escaped_prompt}">{truncated_prompt}</div>
         <div class="meta">
           <span class="time">{run["display_time"]}</span>
-          <span class="stats">{run["image_count"]} images | {run["prompt_count"]} prompts</span>
+          <span class="stats">{run["image_count"]} {'image' if run['image_count'] == 1 else 'images'} | {run["prompt_count"]} {'prompt' if run['prompt_count'] == 1 else 'prompts'}</span>
           <span class="model">{run["model"]}</span>
         </div>
       </div>
@@ -751,7 +751,7 @@ def _build_flat_archive_card_html(archive: dict, interactive: bool) -> str:
         <div class="prompt" title="{escaped_prompt}">{truncated_prompt}</div>
         <div class="meta">
           <span class="time">{archive["display_time"]}</span>
-          <span class="stats">{archive["image_count"]} images</span>
+          <span class="stats">{archive["image_count"]} {'image' if archive['image_count'] == 1 else 'images'}</span>
           <span class="model">{archive["model"]}</span>
         </div>
       </div>
