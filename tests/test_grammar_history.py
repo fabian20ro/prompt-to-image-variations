@@ -386,6 +386,32 @@ class TestAppendGrammarMalformedHistory:
 
 
 class TestGetRecentRevisions:
+    def test_action_filter_reduces_entry_to_single_key(self, run_dir):
+        """include_action=True must reduce each entry to {action: ...}.
+
+        Verifies that when include_action=True is passed, the returned entries
+        contain ONLY the 'action' key — not id, created_at, grammar, or any other
+        fields from the source history. This characterizes the action-filtering
+        contract so future refactors don't accidentally leak full entries through
+        the reduction path.
+        """
+        history = [
+            {
+                "id": f"r{i}",
+                "created_at": f"2024-01-{i+1:02d}T00:00:00",
+                "action": f"a_{i}",
+                "grammar": f"g_{i}",
+            }
+            for i in range(5)
+        ]
+
+        result = get_recent_revisions(history, n=3, include_action=True)
+
+        assert len(result) == 3
+        for entry in result:
+            assert set(entry.keys()) == {"action"}
+            assert isinstance(entry["action"], str)
+
     def test_returns_n_most_recent_entries(self, run_dir):
         """Default slicing returns the last n entries in order."""
         history = [
