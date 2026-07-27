@@ -295,23 +295,17 @@ def test_queue_path_fixture(temp_dir):
     assert not qp.exists()  # only the path is created, no file
 
 
-def test_sample_metadata_fixture():
+def test_sample_metadata_fixture(sample_metadata):
     """Verify sample_metadata fixture has required keys and expected types."""
-    meta = {
-        "prefix": "test",
-        "count": 10,
-        "user_prompt": "a dragon flying over mountains",
-        "model": "ernie-image-turbo",
-        "image_generation": {"images_per_prompt": 1},
-    }
+    meta = sample_metadata
     for key in ("prefix", "count", "user_prompt", "model", "image_generation"):
         assert key in meta, f"missing required key: {key}"
     assert isinstance(meta["count"], int) and meta["count"] > 0
 
 
-def test_sample_grammar_fixture():
+def test_sample_grammar_fixture(sample_grammar):
     """Verify sample_grammar fixture is valid Tracery grammar with origin key."""
-    gram = {"origin": ["#subject# in #setting#"], "subject": ["a cat", "a dog"], "setting": ["a garden", "a forest"]}
+    gram = sample_grammar
     assert "origin" in gram
     assert isinstance(gram["origin"], list) and len(gram["origin"]) > 0
     for key, val in gram.items():
