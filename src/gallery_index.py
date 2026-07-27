@@ -179,6 +179,15 @@ def _extract_flat_archive_infos(saved_dir: Path, interactive: bool = False) -> l
         timestamp = archive["timestamp"]
         first_image = archive["first_image"]
 
+        # Count unique prompts by extracting prompt indices from image filenames
+        import re as _re
+        prompt_idx_pattern = _re.compile(rf'^{re.escape(prefix)}_\d+_(\d+)_.+\.png$')
+        prompt_indices = set()
+        for img_path in archive.get("images", []):
+            match = prompt_idx_pattern.match(img_path.name)
+            if match:
+                prompt_indices.add(match.group(1))
+
         # Format timestamp for display
         display_time = format_run_timestamp(timestamp)
 
@@ -200,6 +209,7 @@ def _extract_flat_archive_infos(saved_dir: Path, interactive: bool = False) -> l
             "display_time": display_time,
             "user_prompt": metadata.get("display_title") or metadata.get("user_prompt", "Archived images"),
             "image_count": archive["image_count"],
+            "prompt_count": len(prompt_indices),
             "model": metadata.get("model", "N/A"),
             "first_image": first_image,
             "backup_reason": backup_reason,
