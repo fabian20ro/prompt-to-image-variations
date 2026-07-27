@@ -63,6 +63,30 @@ def test_run_from_grammar_text_invalid_grammar_returns_error(tmp_path):
     assert "Tracery expansion failed" in result.error or "Invalid JSON grammar" in result.error
 
 
+def test_run_from_grammar_text_tracery_error_returns_failure(tmp_path):
+    """run_from_grammar_text should return a failed PipelineResult when Tracery raises."""
+
+    from tracery_runner import TraceryError
+
+    executor = PipelineExecutor()
+
+    grammar = json.dumps({"origin": ["test"]})
+
+    with patch("pipeline.create_gallery"), \
+         patch("pipeline.generate_master_index"), \
+         patch("pipeline.append_grammar_revision"), \
+         patch("pipeline.run_tracery", side_effect=TraceryError("bad rule")):
+        result = executor.run_from_grammar_text(
+            grammar=grammar,
+            count=3,
+            output_dir=tmp_path / "output",
+        )
+
+    assert result.success is False
+    assert isinstance(result.error, str)
+    assert "Tracery expansion failed" in result.error
+
+
 def test_run_from_grammar_text_progress_callback_invoked(tmp_path):
     """Pipeline should invoke the progress callback with expected stages on success."""
 
@@ -162,6 +186,28 @@ def test_run_from_grammar_text_metadata_structure(tmp_path):
     assert metadata["source"] == "manual"
     assert metadata["user_prompt"] == "test prompt"
     assert metadata["display_title"] == "custom title"
+
+
+def test_run_from_grammar_text_raw_response_saved(tmp_path):
+    """run_from_grammar_text should save raw_response to a file when provided."""
+
+    output_dir = tmp_path / "output"
+
+    with patch("pipeline.create_gallery"), \
+         patch("pipeline.generate_master_index"):
+        result = PipelineExecutor().run_from_grammar_text(
+            grammar='{"origin": ["dragon"]}',
+            count=1,
+            output_dir=output_dir,
+            user_prompt="test prompt",
+            source="manual",
+            raw_response="{\"choices\": [{\"text\": \"raw\"}]}",
+        )
+
+    assert result.success is True
+    raw_file = output_dir / "image_raw_response.txt"
+    assert raw_file.exists()
+    assert raw_file.read_text() == '{"choices": [{"text": "raw"}]}'
 
 
 def test_pipeline_config_to_dict_serialization():
