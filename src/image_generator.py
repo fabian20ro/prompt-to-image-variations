@@ -74,10 +74,14 @@ def generate_image(
     width = width if width is not None else settings.image_generation.default_width
     height = height if height is not None else settings.image_generation.default_height
 
-    if width <= 0 or height <= 0:
-        raise ValueError("Width and height must be positive.")
-    if width % 8 != 0 or height % 8 != 0:
-        raise ValueError("Width and height must be multiples of 8.")
+    if width <= 0:
+        raise ValueError(f"Width must be positive, got {width}.")
+    if height <= 0:
+        raise ValueError(f"Height must be positive, got {height}.")
+    if width % 8 != 0:
+        raise ValueError(f"Width must be a multiple of 8, got {width}.")
+    if height % 8 != 0:
+        raise ValueError(f"Height must be a multiple of 8, got {height}.")
 
     if seed is None:
         seed = random.randint(0, 2**32 - 1)

@@ -214,17 +214,17 @@ def test_generate_image_random_seed_and_tiling(mock_unload, mock_get_model, temp
 @pytest.mark.parametrize(
     "width,height,error_msg",
     [
-        (-1, 512, "Width and height must be positive."),
-        (512, 0, "Width and height must be positive."),
-        (511, 512, "Width and height must be multiples of 8."),
-        (512, 513, "Width and height must be multiples of 8."),
+        (-1, 512, r"Width must be positive, got -1"),
+        (512, 0, r"Height must be positive, got 0"),
+        (511, 512, r"Width must be a multiple of 8, got 511"),
+        (512, 513, r"Height must be a multiple of 8, got 513"),
     ],
 )
 def test_generate_image_rejects_invalid_dimensions(
     temp_dir, width, height, error_msg
 ):
     """Invalid dimensions must raise ValueError with the specific message."""
-    with pytest.raises(ValueError, match=re.escape(error_msg)):
+    with pytest.raises(ValueError, match=error_msg):
         generate_image("test", temp_dir / "image.png", width=width, height=height)
 
 
