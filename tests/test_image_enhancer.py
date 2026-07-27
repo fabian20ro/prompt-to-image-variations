@@ -52,6 +52,14 @@ class TestGetEnhancer:
         result = _get_enhancer(tiled_vae=True)
         assert result is mock_enhancer
 
+    def test_get_enhancer_cache_hit_default_false(self):
+        """Test that cached enhancers are reused on the default tiled_vae=False path."""
+        mock_enhancer = MagicMock()
+        _enhancer_cache[False] = mock_enhancer
+
+        result = _get_enhancer(tiled_vae=False)
+        assert result is mock_enhancer
+
     def test_get_enhancer_mflux_not_installed(self):
         """Test error when mflux is not installed."""
         with patch.dict("sys.modules", {"mflux.models.seedvr2.variants.upscale.seedvr2": None}):
@@ -585,6 +593,30 @@ def test_enhance_image_user_seed_propagates_to_generate_image():
 
         call_kwargs = mock_enhancer.generate_image.call_args.kwargs
         assert call_kwargs["seed"] == 42
+
+
+def test_enhance_image_zero_seed_not_randomized():
+    """Test that seed=0 is passed through unchanged (not replaced by random)."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path, seed=0)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["seed"] == 0
 
 
 def test_enhance_image_resolution_always_scale_factor_2():
