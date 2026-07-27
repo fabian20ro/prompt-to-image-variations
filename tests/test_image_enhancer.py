@@ -52,6 +52,14 @@ class TestGetEnhancer:
         result = _get_enhancer(tiled_vae=True)
         assert result is mock_enhancer
 
+    def test_get_enhancer_cache_hit_default_false(self):
+        """Test that cached enhancers are reused on the default tiled_vae=False path."""
+        mock_enhancer = MagicMock()
+        _enhancer_cache[False] = mock_enhancer
+
+        result = _get_enhancer(tiled_vae=False)
+        assert result is mock_enhancer
+
     def test_get_enhancer_mflux_not_installed(self):
         """Test error when mflux is not installed."""
         with patch.dict("sys.modules", {"mflux.models.seedvr2.variants.upscale.seedvr2": None}):
