@@ -469,3 +469,49 @@ class TestGetCurrentTaskPid:
         pid = qm.get_current_task_pid()
 
         assert pid is None
+
+
+class TestEmitLog:
+    """Tests for QueueManager.emit_log."""
+
+    def test_emit_log_emits_task_log_event(self, queue_path):
+        """emit_log should emit a 'task_log' event with the correct payload shape."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+
+        # Ignore add_task notifications.
+        events.clear()
+
+        qm.emit_log("task-xyz", "Step 3/5 complete")
+
+        assert len(events) == 1
+        event_type, payload = events[0]
+        assert event_type == "task_log"
+        assert payload["task_id"] == "task-xyz"
+        assert payload["message"] == "Step 3/5 complete"
+        assert isinstance(payload["timestamp"], str)
+
+    def test_emit_log_no_spurious_events(self, queue_path):
+        """emit_log should not mutate state or emit other events."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+        task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test"})
+        qm.get_next_task()
+        events.clear()
+
+        qm.emit_log(task.id, "log line")
+
+        state = qm.get_state()
+        assert len(events) == 1
+        assert events[0][0] == "task_log"
+        assert state.current_task is not None  # task unchanged
