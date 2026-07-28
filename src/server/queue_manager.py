@@ -155,6 +155,11 @@ class QueueManager:
         Args:
             task_id: ID of the task
             pid: Process ID of the worker subprocess
+
+        If ``task_id`` does not match the current task (or there is no current
+        task), this method is a no-op — no state mutation and no notification
+        event are emitted. This guarantees deterministic behavior when callers
+        dispatch PID updates to arbitrary ids without prior lookup.
         """
         with self._lock:
             state = self._state
