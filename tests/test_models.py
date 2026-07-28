@@ -11,6 +11,7 @@ from server.models import (
     GenerateRequest,
     GenerateFromGrammarRequest,
     EnhanceImageRequest,
+    GenerateImageRequest,
     GalleryLayoutUpdateRequest,
     RegeneratePromptsApiRequest,
     GenerateAllImagesRequest,
@@ -488,3 +489,73 @@ class TestGenerateAllImagesRequest:
         # Just right
         req = GenerateAllImagesRequest(max_prompts=50)
         assert req.max_prompts == 50
+
+
+class TestGenerateImageRequest:
+    """Tests for GenerateImageRequest image_idx validation."""
+
+    def test_generate_image_request_defaults(self):
+        """Test GenerateImageRequest with default values."""
+        from pydantic import ValidationError
+
+        req = GenerateImageRequest()
+        assert req.image_idx == 0
+
+    def test_generate_image_request_low_bound_rejection(self):
+        """Test that image_idx cannot be negative."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateImageRequest(image_idx=-1)
+
+    def test_generate_image_request_high_bound_rejection(self):
+        """Test that image_idx cannot exceed 1000."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateImageRequest(image_idx=1001)
+
+    def test_generate_image_request_boundary_acceptance(self):
+        """Test boundary values are accepted (0 and 1000)."""
+        req = GenerateImageRequest(image_idx=0)
+        assert req.image_idx == 0
+
+        req = GenerateImageRequest(image_idx=1000)
+        assert req.image_idx == 1000
+
+
+class TestEnhanceAllImagesRequest:
+    """Tests for EnhanceAllImagesRequest softness validation."""
+
+    def test_enhance_all_images_request_defaults(self):
+        """Test EnhanceAllImagesRequest with default values."""
+        from pydantic import ValidationError
+
+        req = EnhanceAllImagesRequest()
+        assert req.softness == 0.5
+
+    def test_enhance_all_images_request_softness_bounds(self):
+        """Test that softness must be within 0-1."""
+        from pydantic import ValidationError
+
+        # Too low
+        with pytest.raises(ValidationError):
+            EnhanceAllImagesRequest(softness=-0.1)
+
+        # Too high
+        with pytest.raises(ValidationError):
+            EnhanceAllImagesRequest(softness=1.5)
+
+        # Just right
+        req = EnhanceAllImagesRequest(softness=0.7)
+        assert req.softness == 0.7
+
+
+class TestGenerateImageRequestExtraFields:
+    """Tests for GenerateImageRequest extra field handling (no forbid config)."""
+
+    def test_generate_image_request_ignores_extra_fields(self):
+        """Test that unknown fields are silently ignored (default Pydantic behavior)."""
+        req = GenerateImageRequest(image_idx=0, bogus_field="should be ignored")
+        assert req.image_idx == 0
+        # Extra fields are silently dropped — no error raised
