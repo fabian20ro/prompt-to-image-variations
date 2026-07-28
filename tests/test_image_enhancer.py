@@ -666,6 +666,22 @@ class TestCollectImagesEdgeCases:
         result = collect_images(str(temp_dir))
         assert result[0].name == "photo.jpeg"
 
+    def test_collect_directory_follows_symlinked_subdirectories(self, temp_dir):
+        """Test that images inside symlinked subdirectories are found."""
+        import os
+        # Create a real subdir with an image
+        sub = temp_dir / "subdir"
+        sub.mkdir()
+        Image.new("RGB", (10, 10)).save(sub / "inside.png")
+
+        # Symlink the subdir into temp_dir's root
+        link = temp_dir / "linked_subdir"
+        os.symlink(str(sub), str(link))
+
+        result = collect_images(str(temp_dir))
+        names = {r.name for r in result}
+        assert "inside.png" in names
+
     def test_collect_single_jpeg_file(self):
         """Test collecting a single .jpeg file."""
         import tempfile

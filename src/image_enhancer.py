@@ -153,11 +153,11 @@ def collect_images(path_spec: str) -> list[Path]:
         raise ValueError(f"Not an image file: {path}")
 
     elif path.is_dir():
-        # Directory - find all images
+        # Directory - find all images, recursing into symlinked subdirectories
         images = []
         for ext in image_extensions:
-            images.extend(path.glob(f"*{ext}"))
-            images.extend(path.glob(f"*{ext.upper()}"))
+            images.extend(path.rglob(f"*{ext}"))
+            images.extend(path.rglob(f"*{ext.upper()}"))
         images = sorted(set(images))
         if not images:
             raise ValueError(f"No images found in directory: {path}")
