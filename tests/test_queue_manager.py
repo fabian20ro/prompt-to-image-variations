@@ -60,15 +60,21 @@ class TestQueueManager:
         qm = QueueManager(queue_path)
 
         # Add two tasks
-        qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test1"})
-        qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test2"})
+        second_task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test2"})
+        first_task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test1"})
 
-        # Get first task
+        # Get first task (LIFO — last added goes in queue head)
         qm.get_next_task()
 
         # Should return None since a task is running
         next_task = qm.get_next_task()
         assert next_task is None
+
+        state = qm.get_state()
+        assert len(state.pending) == 1
+        assert state.pending[0].status == TaskStatus.PENDING
+        assert state.current_task.id == second_task.id
+        assert state.current_task.status == TaskStatus.RUNNING
 
     def test_complete_task(self, queue_path):
         """Test completing a task."""
