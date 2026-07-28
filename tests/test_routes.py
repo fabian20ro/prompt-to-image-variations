@@ -697,3 +697,129 @@ class TestGrammarHistoryNotFoundEndpoint:
         response = client.get("/api/gallery/nonexistent_abc/grammar/history")
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
+
+
+class TestGalleryInfoEndpoint:
+    """Tests for GET /api/gallery/{run_id} endpoint."""
+
+    def test_gallery_info_returns_full_response(self, client, temp_dir):
+        """Test full gallery info retrieval with all fields."""
+        prompts_dir = temp_dir / "prompts"
+        run_id = "20240101_120000_testrun"
+        run_dir = prompts_dir / run_id
+        run_dir.mkdir()
+
+        # Create metadata file
+        (run_dir / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 5,
+            "user_prompt": "a dragon flying over mountains",
+        }))
+
+        # Create gallery HTML file (required by _extract_run_info)
+        (run_dir / "test_gallery.html").write_text("<html>gallery</html>")
+
+        # Create grammar file
+        (run_dir / "test_grammar.json").write_text(json.dumps({
+            "origin": ["a {creature}"],
+            "creature": ["dragon", "unicorn"]
+        }))
+
+        # Create prompt file
+        (run_dir / "test_0.txt").write_text("a dragon flying over mountains")
+
+        # Create an image file with proper naming convention
+        img_path = run_dir / "test_0_0.png"
+        img_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"fake png data")
+
+        response = client.get(f"/api/gallery/{run_id}")
+        assert response.status_code == 200
+        data = response.json()
+
+        # Verify structure
+        assert "info" in data
+        assert "grammar" in data
+        assert "prompts" in data
+        assert "images" in data
+
+        # Verify info fields
+        info = data["info"]
+        assert info["run_id"] == "20240101_120000_testrun"
+        assert info["prefix"] == "test"
+        assert info["user_prompt"] == "a dragon flying over mountains"
+        assert info["prompt_count"] == 5
+        assert info["image_count"] >= 1
+
+    def test_gallery_info_returns_404_for_missing(self, client):
+        """Test that missing gallery returns 404."""
+        response = client.get("/api/gallery/nonexistent_run_id")
+        assert response.status_code == 404
+
+    def test_gallery_info_parses_image_metadata(self, client, temp_dir):
+        """Test that image files are parsed with correct indices."""
+        prompts_dir = temp_dir / "prompts"
+        run_id = "20240101_120000_imgtest"
+        run_dir = prompts_dir / run_id
+        run_dir.mkdir()
+
+        # Use prefix="img" and create matching metadata file
+        (run_dir / "img.metaprompt.json").write_text(json.dumps({
+            "prefix": "img",
+            "count": 3,
+        }))
+
+        # Create gallery HTML file (required by _extract_run_info)
+        (run_dir / "img_gallery.html").write_text("<html>gallery</html>")
+
+        (run_dir / "img_grammar.json").write_text(json.dumps({"origin": ["test"]}))
+        (run_dir / "img_0.txt").write_text("Prompt 1")
+        (run_dir / "img_1.txt").write_text("Prompt 2")
+        (run_dir / "img_2.txt").write_text("Prompt 3")
+
+        # Create image files with specific naming convention: prefix_promptIdx_imageIdx.png
+        (run_dir / "img_0_0.png").write_bytes(b"fake_png_data")
+        (run_dir / "img_0_1.png").write_bytes(b"fake_png_data")
+        (run_dir / "img_2_0.png").write_bytes(b"fake_png_data")
+
+        response = client.get(f"/api/gallery/{run_id}")
+        assert response.status_code == 200
+        data = response.json()
+
+        # Verify images are parsed correctly
+        images = data["images"]
+        assert len(images) == 3
+
+        # Check first image from prompt 0
+        img_0_0 = next(i for i in images if i["prompt_idx"] == 0 and i["image_idx"] == 0)
+        assert img_0_0["filename"] == "img_0_0.png"
+        assert img_0_0["prompt"] == "Prompt 1"
+
+        # Check second image from prompt 2
+        img_2_0 = next(i for i in images if i["prompt_idx"] == 2 and i["image_idx"] == 0)
+        assert img_2_0["filename"] == "img_2_0.png"
+        assert img_2_0["prompt"] == "Prompt 3"
+
+    def test_gallery_info_handles_invalid_filename_format(self, client, temp_dir):
+        """Test that files with invalid naming convention are skipped."""
+        prompts_dir = temp_dir / "prompts"
+        run_dir = prompts_dir / "20240101_120000_badname"
+        run_dir.mkdir()
+
+        (run_dir / "bad.metaprompt.json").write_text(json.dumps({
+            "prefix": "bad",
+        }))
+
+        # Required gallery HTML file (needed by _extract_run_info)
+        (run_dir / "bad_gallery.html").write_text("<html>gallery</html>")
+
+        # Files without proper naming convention should be skipped
+        (run_dir / "random_file.png").write_bytes(b"fake_png_data")
+        (run_dir / "no_dashes.png").write_bytes(b"fake_png_data")
+
+        response = client.get("/api/gallery/20240101_120000_badname")
+        assert response.status_code == 200
+        data = response.json()
+
+        # These files should be skipped due to invalid naming format
+        images = data["images"]
+        assert len(images) == 0
