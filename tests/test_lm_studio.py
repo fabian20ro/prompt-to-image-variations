@@ -166,3 +166,16 @@ class TestUnloadAllModels:
             assert call_args == (["/usr/bin/lms", "unload", "--all"],)
             assert call_kwargs["capture_output"] is True
             assert call_kwargs["text"] is True
+
+    def test_non_timeout_subprocess_exception_propagates_without_retry(self):
+        raise_exc = OSError("device busy")
+
+        with patch("lm_studio.shutil.which", return_value="/usr/bin/lms"), \
+             patch(
+                 "lm_studio.subprocess.run",
+                 side_effect=lambda *a, **kw: (_ for _ in ()).throw(raise_exc),
+             ), \
+             patch("lm_studio.time.sleep"):
+            with pytest.raises(OSError) as exc_info:
+                unload_all_models()
+            assert "device busy" in str(exc_info.value)
