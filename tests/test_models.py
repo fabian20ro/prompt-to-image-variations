@@ -276,6 +276,25 @@ class TestRegeneratePromptsApiRequest:
         assert req.images_per_prompt is None
         assert req.max_prompts is None
 
+    def test_regenerate_prompts_api_request_grammar_optional(self):
+        """Test grammar can be omitted (not required)."""
+        from pydantic import ValidationError
+
+        # No arguments at all — all fields should be None
+        req = RegeneratePromptsApiRequest()
+        assert req.grammar is None
+        # Grammar accepts empty string (no min_length constraint)
+        req_empty = RegeneratePromptsApiRequest(grammar="")
+        assert req_empty.grammar == ""
+
+    def test_regenerate_prompts_api_request_images_per_prompt_zero_boundary(self):
+        """Test that images_per_prompt=0 is allowed (ge=0)."""
+        from pydantic import ValidationError
+
+        # 0 is valid per ge=0 in the model definition
+        req = RegeneratePromptsApiRequest(images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
     def test_regenerate_prompts_api_request_valid_fields(self):
         """Test setting valid field values."""
         from pydantic import ValidationError
