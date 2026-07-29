@@ -635,6 +635,12 @@ class TestGalleryLogsEndpoint:
         assert response.status_code == 400
         assert "non-negative" in response.json()["detail"].lower()
 
+    def test_logs_gallery_not_found(self, client):
+        """Test 404 when requesting logs for a missing gallery."""
+        response = client.get("/api/gallery/20240101_999999_missing/logs")
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
     def test_logs_no_log_file_found(self, client, temp_dir):
         """Test that missing log file returns empty logs."""
         prompts_dir = temp_dir / "prompts"
