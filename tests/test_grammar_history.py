@@ -439,6 +439,35 @@ class TestAppendGrammarMalformedHistory:
 
 
 class TestGetRecentRevisions:
+    def test_include_action_none_returns_full_entries(self):
+        """include_action=None must return full entries (like False, not like True).
+
+        The dedup gate at line 106 checks `if include_action and isinstance(result, list)`.
+        Since None is falsy in Python, passing None explicitly should NOT trigger the
+        action-only reduction — it should behave identically to False. This characterizes
+        that any falsy value (None, False, 0, "") passes through without triggering the
+        reduction path, so callers can safely omit the parameter or pass None without
+        accidentally getting reduced entries.
+
+        Verifies the contract: only truthy values trigger include_action; all others
+        (including explicit None) return full unmodified entries.
+        """
+        history = [
+            {"id": "r0", "action": "a_0", "grammar": "g_0"},
+            {"id": "r1", "action": "a_1", "grammar": "g_1"},
+            {"id": "r2", "action": "a_2", "grammar": "g_2"},
+        ]
+
+        result = get_recent_revisions(history, n=3, include_action=None)
+
+        assert len(result) == 3
+        for entry in result:
+            # Must contain the full entry dict, not just {action: ...}
+            assert "id" in entry
+            assert "action" in entry
+            assert "grammar" in entry
+            assert set(entry.keys()) > {"action"}
+
     def test_action_filter_reduces_entry_to_single_key(self, run_dir):
         """include_action=True must reduce each entry to {action: ...}.
 
