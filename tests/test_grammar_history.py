@@ -79,6 +79,30 @@ class TestSaveGrammarHistory:
         loaded = json.loads(result_path.read_text())
         assert len(loaded) == 1
         assert loaded[0]["id"] == "x"
+        # Full round-trip fidelity: every field must survive write + read.
+        for key in ("id", "created_at", "action", "grammar"):
+            assert loaded[0][key] == history[0][key], f"{key} drifted through save/load cycle"
+
+    def test_round_trip_via_load_grammar_history(self, run_dir):
+        """save → load must round-trip a multi-entry history identically.
+
+        Verifies the production contract: after writing history to disk and
+        re-loading via load_grammar_history (the canonical caller), every entry's
+        fields match their originals — not just count or one field. This catches
+        serialization surprises (type coercion, float precision, key ordering) that
+        single-field assertions miss.
+        """
+        history = [
+            {"id": "r1", "created_at": "2024-06-01T12:30:00", "action": "initial", "grammar": '{"origin":["a"]}'},
+            {"id": "r2", "created_at": "2024-06-01T13:00:00", "action": "update", "grammar": '{"origin":["b"]}'},
+        ]
+
+        save_grammar_history(run_dir, "roundtrip_test", history)
+        loaded = load_grammar_history(run_dir, "roundtrip_test")
+
+        assert len(loaded) == len(history)
+        for orig, got in zip(history, loaded):
+            assert orig == got, f"Entry {got['id']} differs from original after save→load cycle"
 
 
 class TestAppendGrammarRevision:
