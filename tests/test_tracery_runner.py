@@ -43,6 +43,11 @@ class TestParseGrammar:
         result = parse_grammar("{}")
         assert result == {}
 
+    def test_parse_empty_string_raises_error(self):
+        """Test that an empty string triggers the invalid-JSON TraceryError path."""
+        with pytest.raises(TraceryError, match="Invalid JSON grammar"):
+            parse_grammar("")
+
     def test_parse_invalid_json(self):
         """Test error on invalid JSON."""
         with pytest.raises(TraceryError, match="Invalid JSON grammar"):
