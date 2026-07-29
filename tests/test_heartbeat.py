@@ -112,6 +112,28 @@ async def test_heartbeat_creates_daemon_thread():
 
 
 @pytest.mark.asyncio
+async def test_heartbeat_defaults():
+    """Test that Heartbeat uses documented default parameter values."""
+
+    hb = Heartbeat()
+    assert hb.message == "Working...", "Default message must match constructor default"
+    assert hb.interval == 30, "Default interval (seconds) must match constructor default"
+    assert not hb._stop_event.is_set(), "_stop_event must start unset for default instance"
+
+    # Verify emission works with a short interval using defaults applied to the object
+    with patch('src.server.worker_subprocess.emit_progress') as mock_emit:
+        heartbeat = Heartbeat()
+        heartbeat.interval = 1
+        with heartbeat:
+            await asyncio.sleep(2.5)
+
+    # Verify the thread started and emitted at least once with default values
+    assert heartbeat._thread is not None
+    assert any(call.args[0] == "heartbeat" for call in mock_emit.call_args_list), \
+        "Default Heartbeat must emit 'heartbeat' stage progress"
+
+
+@pytest.mark.asyncio
 async def test_heartbeat_stop_event_lifecycle():
     """Test that the stop event transitions from unset to set exactly at __exit__."""
 
