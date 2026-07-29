@@ -405,7 +405,8 @@ async def get_grammar(
     except GalleryNotFoundError:
         raise HTTPException(status_code=404, detail="Gallery not found")
 
-    grammar = service.load_grammar(run_dir)
+    prefix = service.get_prefix(run_dir)
+    grammar = service.load_grammar(run_dir, prefix)
     if grammar is None:
         raise HTTPException(status_code=404, detail="Grammar not found")
 
@@ -495,7 +496,8 @@ async def regenerate_prompts(
     except MetadataNotFoundError:
         raise HTTPException(status_code=404, detail="No metadata found")
 
-    grammar = req.grammar if req and req.grammar is not None else service.load_grammar(run_dir)
+    prefix = service.get_prefix(run_dir)
+    grammar = req.grammar if req and req.grammar is not None else service.load_grammar(run_dir, prefix)
     if grammar is None:
         raise HTTPException(status_code=404, detail="Grammar not found")
 
