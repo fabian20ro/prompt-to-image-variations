@@ -384,6 +384,59 @@ class TestAppendGrammarMalformedHistory:
         assert history[0]["grammar"] == "rule_a"
         # ID is timestamp-based when loaded from empty state (not synthetic "initial")
 
+    def test_extra_keys_in_last_entry_do_not_disrupt_dedup(self, run_dir):
+        """History entries with extra/unexpected keys must not interfere with dedup.
+
+        The dedup gate only inspects 'grammar' and 'action' via .get(). Extra keys
+        (e.g., metadata injected by upstream callers) are ignored — neither the dedup
+        decision nor the appended entry is affected. This locks in that the function
+        does not enumerate or reject unknown fields, so future extensions can safely
+        carry auxiliary data on history entries without breaking append semantics.
+        """
+        path = _history_path(run_dir, "extra_keys_test")
+        enriched_history = [
+            {
+                "id": "old",
+                "created_at": "2024-01-01T00:00:00",
+                "action": "initial",
+                "grammar": "rule_a",
+                "metadata": {"source": "upstream"},  # extra key
+                "tags": ["v1"],                       # extra key
+            },
+        ]
+        path.write_text(json.dumps(enriched_history))
+
+        history = append_grammar_revision(
+            run_dir, "extra_keys_test", grammar="rule_a", action="initial"
+        )
+        assert len(history) == 1  # dedup skipped the append (same grammar+action)
+
+    def test_extra_keys_in_last_entry_allow_append_on_different_action(self, run_dir):
+        """Extra keys in the last entry must not block appending when action differs.
+
+        When the new action does not match `last["action"]`, the dedup gate falls
+        through and appends — extra keys are irrelevant to this decision. This test
+        confirms that the function's append path is fully independent of unknown
+        fields in existing entries, even mid-session state changes.
+        """
+        path = _history_path(run_dir, "extra_keys_diff_action")
+        enriched_history = [
+            {
+                "id": "old",
+                "created_at": "2024-01-01T00:00:00",
+                "action": "initial",
+                "grammar": "rule_a",
+                "metadata": {"source": "upstream"},
+            },
+        ]
+        path.write_text(json.dumps(enriched_history))
+
+        history = append_grammar_revision(
+            run_dir, "extra_keys_diff_action", grammar="rule_a", action="update"
+        )
+        assert len(history) == 2  # different action → appended despite same grammar
+        assert history[1]["action"] == "update"
+
 
 class TestGetRecentRevisions:
     def test_action_filter_reduces_entry_to_single_key(self, run_dir):
