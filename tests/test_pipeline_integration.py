@@ -159,8 +159,9 @@ def test_run_from_grammar_text_empty_expansion(tmp_path):
     assert result.success is True
     assert result.prompt_count == 0
     assert result.image_count == 0
-    # Progress callback should still report all expected stages
-    assert "expanding_prompts" in recorded_stages
+    # With zero expansions, pipeline short-circuits after expansion — only expanding_prompts fires
+    assert recorded_stages.count("expanding_prompts") == 2
+    assert "generating_images" not in recorded_stages
 
 
 def test_run_from_grammar_text_metadata_structure(tmp_path):

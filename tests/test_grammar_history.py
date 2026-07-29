@@ -79,6 +79,30 @@ class TestSaveGrammarHistory:
         loaded = json.loads(result_path.read_text())
         assert len(loaded) == 1
         assert loaded[0]["id"] == "x"
+        # Full round-trip fidelity: every field must survive write + read.
+        for key in ("id", "created_at", "action", "grammar"):
+            assert loaded[0][key] == history[0][key], f"{key} drifted through save/load cycle"
+
+    def test_round_trip_via_load_grammar_history(self, run_dir):
+        """save → load must round-trip a multi-entry history identically.
+
+        Verifies the production contract: after writing history to disk and
+        re-loading via load_grammar_history (the canonical caller), every entry's
+        fields match their originals — not just count or one field. This catches
+        serialization surprises (type coercion, float precision, key ordering) that
+        single-field assertions miss.
+        """
+        history = [
+            {"id": "r1", "created_at": "2024-06-01T12:30:00", "action": "initial", "grammar": '{"origin":["a"]}'},
+            {"id": "r2", "created_at": "2024-06-01T13:00:00", "action": "update", "grammar": '{"origin":["b"]}'},
+        ]
+
+        save_grammar_history(run_dir, "roundtrip_test", history)
+        loaded = load_grammar_history(run_dir, "roundtrip_test")
+
+        assert len(loaded) == len(history)
+        for orig, got in zip(history, loaded):
+            assert orig == got, f"Entry {got['id']} differs from original after save→load cycle"
 
 
 class TestAppendGrammarRevision:
@@ -384,8 +408,90 @@ class TestAppendGrammarMalformedHistory:
         assert history[0]["grammar"] == "rule_a"
         # ID is timestamp-based when loaded from empty state (not synthetic "initial")
 
+    def test_extra_keys_in_last_entry_do_not_disrupt_dedup(self, run_dir):
+        """History entries with extra/unexpected keys must not interfere with dedup.
+
+        The dedup gate only inspects 'grammar' and 'action' via .get(). Extra keys
+        (e.g., metadata injected by upstream callers) are ignored — neither the dedup
+        decision nor the appended entry is affected. This locks in that the function
+        does not enumerate or reject unknown fields, so future extensions can safely
+        carry auxiliary data on history entries without breaking append semantics.
+        """
+        path = _history_path(run_dir, "extra_keys_test")
+        enriched_history = [
+            {
+                "id": "old",
+                "created_at": "2024-01-01T00:00:00",
+                "action": "initial",
+                "grammar": "rule_a",
+                "metadata": {"source": "upstream"},  # extra key
+                "tags": ["v1"],                       # extra key
+            },
+        ]
+        path.write_text(json.dumps(enriched_history))
+
+        history = append_grammar_revision(
+            run_dir, "extra_keys_test", grammar="rule_a", action="initial"
+        )
+        assert len(history) == 1  # dedup skipped the append (same grammar+action)
+
+    def test_extra_keys_in_last_entry_allow_append_on_different_action(self, run_dir):
+        """Extra keys in the last entry must not block appending when action differs.
+
+        When the new action does not match `last["action"]`, the dedup gate falls
+        through and appends — extra keys are irrelevant to this decision. This test
+        confirms that the function's append path is fully independent of unknown
+        fields in existing entries, even mid-session state changes.
+        """
+        path = _history_path(run_dir, "extra_keys_diff_action")
+        enriched_history = [
+            {
+                "id": "old",
+                "created_at": "2024-01-01T00:00:00",
+                "action": "initial",
+                "grammar": "rule_a",
+                "metadata": {"source": "upstream"},
+            },
+        ]
+        path.write_text(json.dumps(enriched_history))
+
+        history = append_grammar_revision(
+            run_dir, "extra_keys_diff_action", grammar="rule_a", action="update"
+        )
+        assert len(history) == 2  # different action → appended despite same grammar
+        assert history[1]["action"] == "update"
+
 
 class TestGetRecentRevisions:
+    def test_include_action_none_returns_full_entries(self):
+        """include_action=None must return full entries (like False, not like True).
+
+        The dedup gate at line 106 checks `if include_action and isinstance(result, list)`.
+        Since None is falsy in Python, passing None explicitly should NOT trigger the
+        action-only reduction — it should behave identically to False. This characterizes
+        that any falsy value (None, False, 0, "") passes through without triggering the
+        reduction path, so callers can safely omit the parameter or pass None without
+        accidentally getting reduced entries.
+
+        Verifies the contract: only truthy values trigger include_action; all others
+        (including explicit None) return full unmodified entries.
+        """
+        history = [
+            {"id": "r0", "action": "a_0", "grammar": "g_0"},
+            {"id": "r1", "action": "a_1", "grammar": "g_1"},
+            {"id": "r2", "action": "a_2", "grammar": "g_2"},
+        ]
+
+        result = get_recent_revisions(history, n=3, include_action=None)
+
+        assert len(result) == 3
+        for entry in result:
+            # Must contain the full entry dict, not just {action: ...}
+            assert "id" in entry
+            assert "action" in entry
+            assert "grammar" in entry
+            assert set(entry.keys()) > {"action"}
+
     def test_action_filter_reduces_entry_to_single_key(self, run_dir):
         """include_action=True must reduce each entry to {action: ...}.
 

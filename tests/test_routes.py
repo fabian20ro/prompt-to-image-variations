@@ -829,3 +829,19 @@ class TestGalleryInfoEndpoint:
         # These files should be skipped due to invalid naming format
         images = data["images"]
         assert len(images) == 0
+
+
+class TestGalleryFileMissingEndpoint:
+    """Tests for missing file scenarios."""
+
+    def test_gallery_file_not_found(self, client):
+        """Test 404 when requesting non-existent gallery file."""
+        response = client.get("/gallery/20240101_999999_missing/image.png")
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    def test_archive_file_not_found(self, client):
+        """Test 404 when requesting non-existent archive file."""
+        response = client.get("/archive/20240101_999999_missing/image.png")
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
