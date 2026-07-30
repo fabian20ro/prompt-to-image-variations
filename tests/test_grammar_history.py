@@ -597,6 +597,29 @@ class TestGetRecentRevisions:
         # Verify every entry is reduced — no leftover keys from source dicts
         assert all(len(e) == 1 for e in result)
 
+    def test_include_action_with_missing_action_key(self):
+        """include_action=True with entries missing 'action' must return {action: None}.
+
+        The reduction path at line 107 uses `e.get("action")`. When an entry has no
+        ``action`` key, ``.get()`` returns None — the action-only reducer faithfully
+        passes through this sentinel rather than raising or substituting a default
+        string. This test characterizes that defensive handling so callers know
+        get_recent_revisions is safe on partially-populated history entries without
+        crashing, and documents the exact return shape ``{"action": None}`` for
+        missing keys.
+        """
+        history = [
+            {"id": "r0", "grammar": "g_0"},
+            {"id": "r1", "grammar": "g_1"},
+        ]
+
+        result = get_recent_revisions(history, n=2, include_action=True)
+
+        assert len(result) == 2
+        for entry in result:
+            assert set(entry.keys()) == {"action"}
+            assert entry["action"] is None
+
     def test_empty_history_returns_empty_list(self):
         """Empty input must yield empty output regardless of n."""
         result = get_recent_revisions([], n=5)
