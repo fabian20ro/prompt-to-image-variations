@@ -595,6 +595,37 @@ class TestGrammarEndpoints:
         assert "Grammar not found" in response.json()["detail"]
 
 
+class TestGetGrammarEndpoint:
+    """Tests for GET /api/gallery/{run_id}/grammar endpoint."""
+
+    def test_get_grammar_loads_non_default_prefix(self, client, temp_dir):
+        """Test that grammar is loaded from the correct prefix file.
+
+        The endpoint must resolve the gallery's actual prefix and load
+        from {prefix}_grammar.json rather than assuming "image". Regression
+        guard for a prior bug where get_grammar() called service.load_grammar()
+        without passing prefix, causing non-default-prefix galleries to fail.
+        """
+        prompts_dir = temp_dir / "prompts"
+        run_id = "20240101_120000_prefixed"
+        run_dir = prompts_dir / run_id
+        run_dir.mkdir()
+
+        # Create metadata with non-default prefix "img"
+        (run_dir / "img.metaprompt.json").write_text(json.dumps({
+            "prefix": "img",
+            "count": 5,
+        }))
+
+        custom_grammar = '{"origin": ["custom grammar content"]}'
+        (run_dir / "img_grammar.json").write_text(custom_grammar)
+
+        response = client.get(f"/api/gallery/{run_id}/grammar")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["grammar"] == custom_grammar
+
+
 class TestRegenerateEndpointInvalidGrammar:
     """Tests for POST /api/gallery/{run_id}/regenerate error paths."""
 

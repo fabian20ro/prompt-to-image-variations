@@ -320,6 +320,30 @@ class TestWorkerExecuteTask:
         return mock_process
 
     @pytest.mark.asyncio
+    async def test_execute_task_tracks_pid_on_spawn(self, worker):
+        """Test that update_task_pid is called with correct args when process spawns."""
+        task = MockTask(task_id="pid-test-id")
+
+        result_json = json.dumps({
+            "type": "result",
+            "success": True,
+            "data": {"run_id": "test-run"},
+        })
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[result_json.encode() + b"\n", b""],
+            stderr_lines=[b""],
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_spawn:
+            await worker._execute_task(task)
+
+        mock_spawn.assert_called_once()
+        worker.queue_manager.update_task_pid.assert_called_with(
+            "pid-test-id", mock_process.pid
+        )
+
+    @pytest.mark.asyncio
     async def test_execute_task_handles_success(self, worker):
         """Test that successful task execution is handled."""
         task = MockTask()

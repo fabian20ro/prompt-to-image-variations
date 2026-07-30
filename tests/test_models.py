@@ -10,6 +10,7 @@ from server.models import (
     TaskProgress,
     GenerateRequest,
     GenerateFromGrammarRequest,
+    RegeneratePromptsRequest,
     EnhanceImageRequest,
     GenerateImageRequest,
     GalleryLayoutUpdateRequest,
@@ -53,6 +54,18 @@ class TestModels:
         assert task.status == TaskStatus.PENDING
         assert task.pid is None
         assert task.params == {}
+        # Timestamps should default to None — critical for queue persistence
+        assert task.started_at is None
+        assert task.completed_at is None
+
+    def test_task_timestamps_accept_datetime(self):
+        """Test Task model timestamps accept datetime objects."""
+        from datetime import datetime
+
+        ts = datetime(2025, 1, 1, 12, 0, 0)
+        task = Task(id="t", type=TaskType.GENERATE_PIPELINE, started_at=ts)
+        assert task.started_at == ts
+        assert task.completed_at is None
 
     def test_task_progress(self):
         """Test TaskProgress model."""
@@ -568,6 +581,59 @@ class TestEnhanceAllImagesRequest:
         # Just right
         req = EnhanceAllImagesRequest(softness=0.7)
         assert req.softness == 0.7
+
+
+class TestGenerateFromGrammarRequestValidation:
+    """Tests for GenerateFromGrammarRequest field validation."""
+
+    def test_generate_from_grammar_request_images_per_prompt_bounds(self):
+        """Test that images_per_prompt must be within 0-100 (ge=0, le=100)."""
+        from pydantic import ValidationError
+
+        # Below lower bound (ge=0, so -1 should fail)
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
+        # Above upper bound
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=101)
+
+    def test_generate_from_grammar_request_dimensions_min_bound(self):
+        """Test that width/height reject values below 64."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', width=32)
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', height=32)
+
+        # Boundary: 64 is allowed (ge=64)
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', width=64, height=64)
+        assert req.width == 64
+        assert req.height == 64
+
+    def test_generate_from_grammar_request_seed_negative_rejected(self):
+        """Test that negative seed is rejected (ge=0)."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', seed=-1)
+
+        # Boundary: 0 allowed, None default works
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', seed=0)
+        assert req.seed == 0
+
+    def test_generate_from_grammar_request_extra_fields_rejected(self):
+        """Test that extra fields are rejected (ConfigDict(extra='forbid'))."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', bogus_field="should fail")
 
 
 class TestGenerateImageRequestExtraFields:
