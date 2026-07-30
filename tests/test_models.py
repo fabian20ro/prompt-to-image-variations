@@ -10,6 +10,7 @@ from server.models import (
     TaskProgress,
     GenerateRequest,
     GenerateFromGrammarRequest,
+    RegeneratePromptsRequest,
     EnhanceImageRequest,
     GenerateImageRequest,
     GalleryLayoutUpdateRequest,
@@ -53,6 +54,18 @@ class TestModels:
         assert task.status == TaskStatus.PENDING
         assert task.pid is None
         assert task.params == {}
+        # Timestamps should default to None — critical for queue persistence
+        assert task.started_at is None
+        assert task.completed_at is None
+
+    def test_task_timestamps_accept_datetime(self):
+        """Test Task model timestamps accept datetime objects."""
+        from datetime import datetime
+
+        ts = datetime(2025, 1, 1, 12, 0, 0)
+        task = Task(id="t", type=TaskType.GENERATE_PIPELINE, started_at=ts)
+        assert task.started_at == ts
+        assert task.completed_at is None
 
     def test_task_progress(self):
         """Test TaskProgress model."""
