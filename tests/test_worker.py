@@ -521,6 +521,31 @@ class TestWorkerExecuteTask:
             task.id, "Process exited with code 1"
         )
 
+    @pytest.mark.asyncio
+    async def test_execute_task_json_error_overrides_stderr(self, worker):
+        """Test that JSON-detected failure takes precedence over non-zero exit stderr."""
+        task = MockTask()
+
+        result_json = json.dumps({
+            "type": "result",
+            "success": False,
+            "error": "API key expired",
+        })
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[result_json.encode() + b"\n", b""],
+            stderr_lines=[b"internal server error\n", b""],
+            return_code=1,
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            await worker._execute_task(task)
+
+        # JSON failure message should take precedence over stderr join
+        worker.queue_manager.fail_task.assert_called_with(
+            task.id, "API key expired"
+        )
+
 
 class TestWorkerRun:
     """Tests for Worker.run() main loop."""
