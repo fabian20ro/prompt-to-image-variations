@@ -641,6 +641,15 @@ class TestGenerateImageRequestExtraFields:
 
     def test_generate_image_request_ignores_extra_fields(self):
         """Test that unknown fields are silently ignored (default Pydantic behavior)."""
-        req = GenerateImageRequest(image_idx=0, bogus_field="should be ignored")
+        from pydantic import ValidationError
+
+        # Verify no error is raised when extra fields are passed — GenerateImageRequest
+        # has no ConfigDict(extra="forbid"), so extras should be dropped without validation.
+        # Confirm: extras accepted without raising
+        req = GenerateImageRequest(bogus_field="should not raise", image_idx=0)
         assert req.image_idx == 0
+
+        # Also confirm a known-valid field still works normally
+        req2 = GenerateImageRequest(image_idx=0, bogus_field="should be ignored")
+        assert req2.image_idx == 0
         # Extra fields are silently dropped — no error raised
