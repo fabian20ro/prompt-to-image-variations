@@ -583,6 +583,59 @@ class TestEnhanceAllImagesRequest:
         assert req.softness == 0.7
 
 
+class TestGenerateFromGrammarRequestValidation:
+    """Tests for GenerateFromGrammarRequest field validation."""
+
+    def test_generate_from_grammar_request_images_per_prompt_bounds(self):
+        """Test that images_per_prompt must be within 0-100 (ge=0, le=100)."""
+        from pydantic import ValidationError
+
+        # Below lower bound (ge=0, so -1 should fail)
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
+        # Above upper bound
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=101)
+
+    def test_generate_from_grammar_request_dimensions_min_bound(self):
+        """Test that width/height reject values below 64."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', width=32)
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', height=32)
+
+        # Boundary: 64 is allowed (ge=64)
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', width=64, height=64)
+        assert req.width == 64
+        assert req.height == 64
+
+    def test_generate_from_grammar_request_seed_negative_rejected(self):
+        """Test that negative seed is rejected (ge=0)."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', seed=-1)
+
+        # Boundary: 0 allowed, None default works
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', seed=0)
+        assert req.seed == 0
+
+    def test_generate_from_grammar_request_extra_fields_rejected(self):
+        """Test that extra fields are rejected (ConfigDict(extra='forbid'))."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', bogus_field="should fail")
+
+
 class TestGenerateImageRequestExtraFields:
     """Tests for GenerateImageRequest extra field handling (no forbid config)."""
 
