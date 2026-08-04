@@ -440,3 +440,39 @@ class TestEnvVarDocs:
         from config import format_env_docs
         output = format_env_docs({})
         assert output.startswith("# Environment Variables\n\n")
+
+    def test_path_config_env_docs_file_property(self):
+        """Test that PathConfig.env_docs_file returns the expected generated path."""
+        from pathlib import Path
+        from config import paths
+
+        env_doc_path = paths.env_docs_file
+        assert isinstance(env_doc_path, Path)
+        assert str(env_doc_path).endswith(".env.example")
+        # Should be under generated_dir, not root or src
+        assert ".env.example" in str(env_doc_path)
+        assert "generated" in str(env_doc_path)
+
+    def test_generate_env_example_writes_documented_file(self):
+        """Test that generate_env_example writes a properly formatted .env.example file.
+
+        Verifies the new convenience function: it should call format_env_docs(),
+        write to paths.env_docs_file, create parent dirs if needed, and return
+        the path of the written file. The produced content must match what
+        format_env_docs() returns for the same input.
+        """
+        from config import generate_env_example, ENV_VAR_DOCS, format_env_docs
+
+        result = generate_env_example()
+
+        assert result.exists()
+        assert str(result).endswith(".env.example")
+
+        content = result.read_text()
+        expected = format_env_docs(ENV_VAR_DOCS)
+        assert content == expected
+
+        # Verify the file is a proper comment block with all env vars documented
+        assert "# Environment Variables\n" in content
+        for key in ENV_VAR_DOCS:
+            assert f"# {key}" in content
