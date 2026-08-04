@@ -248,6 +248,60 @@ class TestCliValidation:
         assert "Warning" not in result.output
         assert "--prompt is ignored" not in result.output
 
+    @patch("cli.PipelineExecutor")
+    def test_json_output_shape_on_success(self, mock_executor_cls):
+        """Test --json outputs valid JSON with expected keys on pipeline success."""
+        runner = CliRunner()
+
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/test_run")
+        mock_result.prompt_count = 5
+        mock_result.image_count = 10
+        mock_result.skipped_count = 2
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        result = runner.invoke(main, [
+            "--prompt", "a cat", "--json",
+        ])
+
+        assert result.exit_code == 0
+        json_start = result.output.find("{")
+        parsed = json.loads(result.output[json_start:])
+        assert parsed["success"] is True
+        assert parsed["prompt_count"] == 5
+        assert parsed["image_count"] == 10
+        assert parsed["skipped_count"] == 2
+        assert "output_dir" in parsed
+
+    @patch("cli.PipelineExecutor")
+    def test_json_output_omits_empty_fields(self, mock_executor_cls):
+        """Test --json uses None when output_dir is missing (produces null)."""
+        runner = CliRunner()
+
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = None
+        mock_result.prompt_count = 1
+        mock_result.image_count = 0
+        mock_result.skipped_count = 0
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        result = runner.invoke(main, [
+            "--prompt", "a cat", "--json",
+        ])
+
+        assert result.exit_code == 0
+        json_start = result.output.find("{")
+        parsed = json.loads(result.output[json_start:])
+        assert parsed["output_dir"] is None
+
 
 class TestCliEnhanceImages:
     """Tests for --enhance-images flag."""
