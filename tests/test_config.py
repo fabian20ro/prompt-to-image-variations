@@ -247,6 +247,42 @@ class TestConfig:
             with pytest.raises(ValueError, match="default_scale must be at least 1"):
                 Settings.from_env()
 
+    def test_negative_width_via_enhancement_config(self):
+        """Test that negative width via env var raises ValueError through ImageGenerationConfig.
+
+        _get_env_int silently accepts negatives/zeros, but ImageGenerationConfig.__post_init__
+        validates the value. Unlike float keys (which fall back to defaults), int width
+        values pass validation and then fail at dataclass construction — no graceful fallback.
+        """
+        from config import Settings
+        with patch.dict(os.environ, {"PROMPT_GEN_DEFAULT_WIDTH": "-100"}):
+            with pytest.raises(ValueError, match="default_width must be positive"):
+                Settings.from_env()
+
+    def test_negative_height_via_enhancement_config(self):
+        """Test that negative height via env var raises ValueError through ImageGenerationConfig.
+
+        _get_env_int silently accepts negatives/zeros, but ImageGenerationConfig.__post_init__
+        validates the value. Unlike float keys (which fall back to defaults), int height
+        values pass validation and then fail at dataclass construction — no graceful fallback.
+        """
+        from config import Settings
+        with patch.dict(os.environ, {"PROMPT_GEN_DEFAULT_HEIGHT": "-200"}):
+            with pytest.raises(ValueError, match="default_height must be positive"):
+                Settings.from_env()
+
+    def test_zero_width_via_enhancement_config(self):
+        """Test that zero width via env var raises ValueError through ImageGenerationConfig.
+
+        _get_env_int accepts zero as a valid int, but ImageGenerationConfig.__post_init__
+        validates the value (must be > 0). Zero passes validation at the env layer and
+        then fails at dataclass construction — no graceful fallback like floats get.
+        """
+        from config import Settings
+        with patch.dict(os.environ, {"PROMPT_GEN_DEFAULT_WIDTH": "0"}):
+            with pytest.raises(ValueError, match="default_width must be positive"):
+                Settings.from_env()
+
     def test_non_numeric_seed_falls_back(self):
         """Test that non-numeric seed values fall back to default 0."""
         from config import Settings
