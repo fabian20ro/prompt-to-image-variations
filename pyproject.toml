@@ -1,7 +1,7 @@
 [project]
-name = "image-prompt-expander"
+name = "prompt-to-image-variations"
 version = "0.1.0"
-description = "Procedural image prompt generator with optional local image generation."
+description = "Turn an image idea into concrete prompt variations with optional local rendering."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

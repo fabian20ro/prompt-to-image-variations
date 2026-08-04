@@ -899,7 +899,7 @@ wheels = [
 ]
 
 [[package]]
-name = "image-prompt-expander"
+name = "prompt-to-image-variations"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

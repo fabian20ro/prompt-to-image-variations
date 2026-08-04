@@ -20,7 +20,7 @@ from .queue_manager import QueueManager
 from .worker import Worker
 
 
-logger = logging.getLogger("image-prompt-expander")
+logger = logging.getLogger("prompt-to-image-variations")
 
 
 # Global instances

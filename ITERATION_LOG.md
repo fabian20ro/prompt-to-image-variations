@@ -321,4 +321,14 @@ Each entry should follow this structure:
 
 ---
 
+### [2026-08-04] Migrated repository identity
+
+**Context:** Git transport for the original GitHub repository was disabled, requiring a recoverable migration to a fresh repository and clearer product name.
+**What happened:** Renamed the product and package to Prompt to Image Variations, updated repository and Pages URLs, and retained historical run artifacts unchanged.
+**Outcome:** Local identity patch prepared for `fabian20ro/prompt-to-image-variations`; full automated checks run as migration verification.
+**Insight:** Historical reports should retain the repository identity recorded when they were generated; current code, package metadata, documentation, and operational links should use the replacement identity.
+**Promoted to Lessons Learned:** No
+
+---
+
 <!-- New entries go above this line, most recent first -->

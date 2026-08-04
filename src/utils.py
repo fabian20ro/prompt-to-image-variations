@@ -1,4 +1,4 @@
-"""Shared utility functions for the image-prompt-expander application."""
+"""Shared utility functions for the prompt-to-image-variations application."""
 
 import json
 import logging

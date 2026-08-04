@@ -8,7 +8,7 @@ allowed-tools:
 
 # Web Server
 
-Start the image-prompt-expander web server.
+Start the prompt-to-image-variations web server.
 
 ## Usage
 

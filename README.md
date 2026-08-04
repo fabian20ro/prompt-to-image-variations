@@ -1,4 +1,4 @@
-# ERNIE Image Prompt Expander
+# Prompt to Image Variations
 
 Local procedural prompt generation and image rendering for ERNIE-Image-Turbo on Apple Silicon.
 
