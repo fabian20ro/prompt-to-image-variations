@@ -139,6 +139,22 @@ class TestModels:
         req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=0)
         assert req.images_per_prompt == 0
 
+    def test_generate_from_grammar_title_max_length(self):
+        """Test that title respects max_length=500 on GenerateFromGrammarRequest."""
+        from pydantic import ValidationError
+
+        # Over limit: 501 characters
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', title="x" * 501)
+
+        # Boundary: exactly 500 is allowed (le=500 in Field)
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', title="y" * 500)
+        assert req.title == "y" * 500
+
+        # None remains the default
+        req_none = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}')
+        assert req_none.title is None
+
 
 class TestInputValidation:
     """Tests for Pydantic model input validation."""
