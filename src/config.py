@@ -146,8 +146,26 @@ class PathConfig:
         """Directory for system prompt templates."""
         return self.root_dir / "templates"
 
+    @property
+    def env_docs_file(self) -> Path:
+        """Path to the generated environment variable documentation file."""
+        return self.generated_dir / ".env.example"
+
+
 # Singleton path configuration instance
 paths = PathConfig()
+
+
+def generate_env_example(env_vars: dict[str, dict[str, str]] | None = None) -> Path:
+    """Write formatted env var docs to the project's generated directory.
+
+    Returns the path where the file was written so callers can link or verify it.
+    """
+    text = format_env_docs(env_vars)
+    paths.env_docs_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(paths.env_docs_file, "w") as f:
+        f.write(text)
+    return paths.env_docs_file
 
 @dataclass
 class Settings:

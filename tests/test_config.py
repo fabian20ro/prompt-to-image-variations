@@ -247,6 +247,42 @@ class TestConfig:
             with pytest.raises(ValueError, match="default_scale must be at least 1"):
                 Settings.from_env()
 
+    def test_negative_width_via_enhancement_config(self):
+        """Test that negative width via env var raises ValueError through ImageGenerationConfig.
+
+        _get_env_int silently accepts negatives/zeros, but ImageGenerationConfig.__post_init__
+        validates the value. Unlike float keys (which fall back to defaults), int width
+        values pass validation and then fail at dataclass construction — no graceful fallback.
+        """
+        from config import Settings
+        with patch.dict(os.environ, {"PROMPT_GEN_DEFAULT_WIDTH": "-100"}):
+            with pytest.raises(ValueError, match="default_width must be positive"):
+                Settings.from_env()
+
+    def test_negative_height_via_enhancement_config(self):
+        """Test that negative height via env var raises ValueError through ImageGenerationConfig.
+
+        _get_env_int silently accepts negatives/zeros, but ImageGenerationConfig.__post_init__
+        validates the value. Unlike float keys (which fall back to defaults), int height
+        values pass validation and then fail at dataclass construction — no graceful fallback.
+        """
+        from config import Settings
+        with patch.dict(os.environ, {"PROMPT_GEN_DEFAULT_HEIGHT": "-200"}):
+            with pytest.raises(ValueError, match="default_height must be positive"):
+                Settings.from_env()
+
+    def test_zero_width_via_enhancement_config(self):
+        """Test that zero width via env var raises ValueError through ImageGenerationConfig.
+
+        _get_env_int accepts zero as a valid int, but ImageGenerationConfig.__post_init__
+        validates the value (must be > 0). Zero passes validation at the env layer and
+        then fails at dataclass construction — no graceful fallback like floats get.
+        """
+        from config import Settings
+        with patch.dict(os.environ, {"PROMPT_GEN_DEFAULT_WIDTH": "0"}):
+            with pytest.raises(ValueError, match="default_width must be positive"):
+                Settings.from_env()
+
     def test_non_numeric_seed_falls_back(self):
         """Test that non-numeric seed values fall back to default 0."""
         from config import Settings
@@ -404,3 +440,39 @@ class TestEnvVarDocs:
         from config import format_env_docs
         output = format_env_docs({})
         assert output.startswith("# Environment Variables\n\n")
+
+    def test_path_config_env_docs_file_property(self):
+        """Test that PathConfig.env_docs_file returns the expected generated path."""
+        from pathlib import Path
+        from config import paths
+
+        env_doc_path = paths.env_docs_file
+        assert isinstance(env_doc_path, Path)
+        assert str(env_doc_path).endswith(".env.example")
+        # Should be under generated_dir, not root or src
+        assert ".env.example" in str(env_doc_path)
+        assert "generated" in str(env_doc_path)
+
+    def test_generate_env_example_writes_documented_file(self):
+        """Test that generate_env_example writes a properly formatted .env.example file.
+
+        Verifies the new convenience function: it should call format_env_docs(),
+        write to paths.env_docs_file, create parent dirs if needed, and return
+        the path of the written file. The produced content must match what
+        format_env_docs() returns for the same input.
+        """
+        from config import generate_env_example, ENV_VAR_DOCS, format_env_docs
+
+        result = generate_env_example()
+
+        assert result.exists()
+        assert str(result).endswith(".env.example")
+
+        content = result.read_text()
+        expected = format_env_docs(ENV_VAR_DOCS)
+        assert content == expected
+
+        # Verify the file is a proper comment block with all env vars documented
+        assert "# Environment Variables\n" in content
+        for key in ENV_VAR_DOCS:
+            assert f"# {key}" in content

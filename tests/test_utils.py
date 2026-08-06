@@ -471,6 +471,32 @@ class TestUtils:
         }
         assert names == expected_names
 
+    def test_scan_flat_archives_first_image_cross_prompt_idx(self, temp_dir):
+        """Test scan_flat_archives first_image is lex-smallest across all prompt indices.
+
+        When multiple images from different promptIdx values share the same archive
+        timestamp, first_image must point to the overall lexicographically smallest
+        filename — not just within one promptIdx's files. This catches regressions where
+        implementation might sort per-prompt-index instead of full-filename comparison.
+        """
+        saved_dir = temp_dir / "saved"
+        saved_dir.mkdir()
+
+        img = Image.new('RGB', (10, 10), color='purple')
+        # Same prefix+timestamp but different promptIdx values: 5_0, 12_0, 3_9
+        # Lex sort of full filenames: "gal_20240510_180000_12_0.png" < "gal_20240510_180000_3_9.png" < "gal_20240510_180000_5_0.png"
+        # So first_image must be the one with promptIdx 12 (not 3, which is numerically smallest)
+        img.save(saved_dir / "gal_20240510_180000_5_0.png")
+        img.save(saved_dir / "gal_20240510_180000_12_0.png")
+        img.save(saved_dir / "gal_20240510_180000_3_9.png")
+
+        result = scan_flat_archives(saved_dir)
+        assert len(result) == 1
+        archive = result[0]
+        assert archive["image_count"] == 3
+        # Lex-smallest full filename across all files (not just per-promptIdx smallest)
+        assert archive["first_image"].name == "gal_20240510_180000_12_0.png"
+
     def test_truncate_for_png_under_limit(self):
         """Test _truncate_for_png returns value unchanged when under limit."""
         short_text = "a simple prompt" * 10
