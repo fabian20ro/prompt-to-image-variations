@@ -273,7 +273,7 @@ def main(
 
     # Handle --dump-config: print all settings and exit
     if dump_config:
-        _print_settings()
+        _print_settings(quiet=quiet)
         return
 
     # Handle --version-check
@@ -534,24 +534,28 @@ def _run_dry_run(
         sys.exit(1)
 
 
-def _print_settings() -> None:
-    """Print all effective settings with their current values."""
-    import dataclasses as dc
+def _print_settings(quiet: bool = False) -> None:
+    """Print all effective settings with their current values.
 
-    print("ERNIE-Image-Turbo CLI Settings")
-    print("=" * 50)
-    for name, obj in [("LM Studio", settings.lm_studio),
-                       ("Image Generation", settings.image_generation),
-                       ("Server", settings.server),
-                       ("Enhancement", settings.enhancement)]:
-        print(f"\n[{name}]")
-        if dc.is_dataclass(obj):
-            for field in dc.fields(obj):
-                value = getattr(obj, field.name)
-                # Format paths as strings, others normally
-                if hasattr(value, '__fspath__'):
-                    value = str(value)
-                print(f"  {field.name}: {value}")
+    When quiet=True, suppresses output (silent).
+    """
+    if not quiet:
+        import dataclasses as dc
+
+        print("ERNIE-Image-Turbo CLI Settings")
+        print("=" * 50)
+        for name, obj in [("LM Studio", settings.lm_studio),
+                           ("Image Generation", settings.image_generation),
+                           ("Server", settings.server),
+                           ("Enhancement", settings.enhancement)]:
+            print(f"\n[{name}]")
+            if dc.is_dataclass(obj):
+                for field in dc.fields(obj):
+                    value = getattr(obj, field.name)
+                    # Format paths as strings, others normally
+                    if hasattr(value, '__fspath__'):
+                        value = str(value)
+                    print(f"  {field.name}: {value}")
 
 
 if __name__ == '__main__':
