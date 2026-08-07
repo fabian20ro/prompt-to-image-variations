@@ -877,3 +877,55 @@ class TestRunDeleteGallery:
             lines = [l for l in captured.out.strip().split("\n") if l]
             result = json.loads(lines[-1])
             assert result["success"] is True
+
+
+class TestRunRegeneratePromptsMetadataFallback:
+    """Tests for run_regenerate_prompts metadata error fallback."""
+
+    def test_run_regenerate_prompts_metadata_error_fallback(self, capsys):
+        """Test that MetadataError in run_regenerate_prompts falls back to default prefix."""
+        from conftest import create_run_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompts_dir = Path(tmpdir) / "prompts"
+            prompts_dir.mkdir(parents=True)
+            run_dir = prompts_dir / "test-run"
+            run_dir.mkdir(parents=True)
+            create_run_files(run_dir, prefix="test", num_prompts=2)
+
+            with patch("server.worker_subprocess.paths") as mock_paths:
+                mock_paths.prompts_dir = prompts_dir
+
+                with patch(
+                    "server.worker_subprocess.MetadataManager.load",
+                    side_effect=MetadataError("metadata not found"),
+                ) as mock_load:
+                    mock_executor = MagicMock()
+                    mock_executor.regenerate_prompts.return_value = PipelineResult(
+                        success=True,
+                        run_id="test-run",
+                        prompt_count=3,
+                    )
+
+                    with patch("server.worker_subprocess.create_executor") as mock_exec:
+                        mock_exec.return_value = mock_executor
+
+                        # Verify that set_log_file is called during fallback path
+                        def verify_set_log(*args):
+                            assert args[0].name.endswith("_worker.log"), \
+                                f"Expected .log suffix, got {args[0]}"
+                            return None
+
+                        with patch(
+                            "server.worker_subprocess.set_log_file",
+                            side_effect=verify_set_log,
+                        ):
+                            run_regenerate_prompts({
+                                "run_id": "test-run",
+                                "grammar": '{"origin": ["test"]}',
+                            })
+
+            captured = capsys.readouterr()
+            lines = [l for l in captured.out.strip().split("\n") if l]
+            result = json.loads(lines[-1])
+            assert result["success"] is True

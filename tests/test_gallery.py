@@ -423,6 +423,8 @@ class TestBuildCardHtml:
         html = _build_card_html("pending.png", "my prompt", 1, 2, exists=False, interactive=True)
 
         assert 'class="card-actions"' in html
+        assert '<button class="btn-small btn-primary"' in html
+        assert '<button class="btn-small btn-secondary"' in html
         assert "generateImage(this, 1, 2)" in html
         assert "enhanceImage(this, 1, 2)" in html
         assert '>Generate<' in html
@@ -437,6 +439,8 @@ class TestBuildCardHtml:
         html_out = _build_card_html("test_0_0.png", escaped, 0, 0, exists=True, interactive=True)
 
         assert 'class="card-actions"' in html_out
+        assert '<button class="btn-small btn-primary"' in html_out
+        assert '<button class="btn-small btn-secondary"' in html_out
         assert "generateImage(this, 0, 0)" in html_out
         assert "enhanceImage(this, 0, 0)" in html_out
         assert '>Generate<' in html_out
