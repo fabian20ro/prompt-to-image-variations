@@ -426,6 +426,59 @@ class TestRunFullPipelineWithImages:
     @patch("pipeline.create_gallery")
     @patch("pipeline.run_tracery")
     @patch("pipeline.generate_grammar")
+    def test_max_prompts_write_all_prompt_files_but_limit_gallery(
+        self, mock_grammar, mock_tracery, mock_gallery, mock_index, temp_dir
+    ):
+        """Test that max_prompts limits gallery rendering but writes all prompt files.
+
+        Verifies the 'save all / render limited' contract: when max_prompts is set,
+        ALL generated prompts are written to disk (for later regeneration), while
+        only the first N prompts are passed to create_gallery for rendering.
+        This catches regressions in the save-vs-render split that would otherwise
+        silently lose prompt data or over-render.
+        """
+        mock_grammar.return_value = ('{"origin": ["test"]}', False, None)
+        mock_tracery.return_value = ["prompt 1", "prompt 2", "prompt 3"]
+        mock_gallery.return_value = temp_dir / "prompts" / "test_gallery.html"
+
+        captured_kwargs = {}
+        captured_prompts = []
+
+        def fake_create_gallery(*args, **kwargs):
+            # args: (output_dir, prefix, prompts_to_render, images_per_prompt)
+            captured_prompts.extend(args[2])  # third positional arg is the prompt list
+            captured_kwargs.update(kwargs)
+            return temp_dir / "prompts" / "test_gallery.html"
+
+        with patch("pipeline.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "prompts"
+            mock_paths.prompts_dir.mkdir(parents=True)
+            mock_paths.generated_dir = temp_dir
+
+            executor = PipelineExecutor()
+            with patch("pipeline.create_gallery", side_effect=fake_create_gallery):
+                result = executor.run_full_pipeline(
+                    prompt="test", count=3, prefix="test",
+                    generate_images=False, max_prompts=2,
+                )
+
+        assert result.success is True
+        assert result.prompt_count == 3
+        assert result.image_count == 0
+
+        # All 3 prompt files should be written to disk (save all)
+        for i in range(3):
+            expected_file = result.output_dir / f"test_{i}.txt"
+            assert expected_file.exists(), f"Expected {expected_file.name} not found"
+
+        # Gallery should only receive first 2 prompts (render limited)
+        assert len(captured_prompts) == 2
+        assert captured_prompts == ["prompt 1", "prompt 2"]
+
+    @patch("pipeline.generate_master_index")
+    @patch("pipeline.create_gallery")
+    @patch("pipeline.run_tracery")
+    @patch("pipeline.generate_grammar")
     def test_generate_images_passes_enhancement_params(
         self, mock_grammar, mock_tracery, mock_gallery, mock_index, temp_dir
     ):
