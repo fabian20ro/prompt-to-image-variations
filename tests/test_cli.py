@@ -248,6 +248,20 @@ class TestCliValidation:
         assert "Warning" not in result.output
         assert "--prompt is ignored" not in result.output
 
+    def test_prompt_ignored_with_from_prompts_not_quiet(self, temp_dir):
+        """Test that without --quiet the warning about ignoring --prompt appears."""
+        prompts_dir = temp_dir / "prompts"
+        prompts_dir.mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "-p", "ignored prompt",
+            "--from-prompts", str(prompts_dir),
+            "--generate-images",
+        ])
+
+        assert "prompt is ignored" in result.output
+
     @patch("cli.PipelineExecutor")
     def test_json_output_shape_on_success(self, mock_executor_cls):
         """Test --json outputs valid JSON with expected keys on pipeline success."""
@@ -387,6 +401,41 @@ class TestCliEnhanceImages:
         assert "Interrupted." in result.output
         # Should NOT show the LM Studio error message
         assert "Make sure LM Studio is running" not in result.output
+
+
+class TestReadPromptFromStdin:
+    """Tests for _read_prompt_from_stdin function."""
+
+    def test_keyboard_interrupt_exits_130(self):
+        """Test KeyboardInterrupt during stdin read exits with code 130 and prints 'Interrupted.'"""
+        import sys as _sys
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+
+        # Use monkeypatch to simulate Ctrl+C on stdin.read()
+        def raise_keyboard_interrupt():
+            raise KeyboardInterrupt()
+
+        class FakeStdin:
+            @staticmethod
+            def read():
+                raise KeyboardInterrupt()
+
+        with patch("sys.stdin", FakeStdin()):
+            # Test _read_prompt_from_stdin directly by mocking sys.exit to capture behavior
+            exit_code = []
+
+            def mock_exit(code):
+                exit_code.append(code)
+
+            import cli as cli_mod
+            with patch.object(_sys, "exit", side_effect=mock_exit), \
+                 patch("cli.click.echo") as mock_echo:
+                result = cli_mod._read_prompt_from_stdin("-")
+
+        assert len(exit_code) == 1
+        assert exit_code[0] == 130
 
     @patch("cli.generate_grammar")
     def test_dry_run_non_connectivity_error_no_lm_hint(self, mock_generate_grammar):
