@@ -945,3 +945,25 @@ class TestDumpConfigFlag:
         result = runner.invoke(main, ["--help"])
         assert "--dump-config" in result.output
         assert "effective settings" in result.output or "settings" in result.output
+
+    def test_dump_config_quiet_suppresses_output(self):
+        """Test that --quiet suppresses _print_settings output."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--dump-config", "--quiet"])
+        assert result.exit_code == 0
+        # Settings block should not appear in output when quiet is on
+        assert "ERNIE-Image-Turbo CLI Settings" not in result.output
+
+    def test_print_settings_quiet_silent(self, capsys):
+        """Test that _print_settings with quiet=True prints nothing."""
+        from cli import _print_settings
+        _print_settings(quiet=True)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_print_settings_default_verbose(self, capsys):
+        """Test that _print_settings without quiet still prints settings."""
+        from cli import _print_settings
+        _print_settings(quiet=False)
+        captured = capsys.readouterr()
+        assert "ERNIE-Image-Turbo CLI Settings" in captured.out

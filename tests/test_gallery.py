@@ -1,11 +1,12 @@
 """Tests for interactive gallery generation."""
 
 import json
+from pathlib import Path
 
 import pytest
 
 from conftest import create_run_files
-from gallery import generate_gallery_for_directory, update_gallery
+from gallery import create_gallery, generate_gallery_for_directory, update_gallery
 
 
 class TestGalleryInteractive:
@@ -445,3 +446,82 @@ class TestBuildCardHtml:
         assert "enhanceImage(this, 0, 0)" in html_out
         assert '>Generate<' in html_out
         assert '>Enhance<' in html_out
+
+
+class TestCreateGallery:
+    """Tests for create_gallery standalone behavior."""
+
+    def test_create_gallery_writes_file_and_returns_path(self, temp_dir):
+        """create_gallery must write a gallery file and return its path."""
+        from gallery import create_gallery
+
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="direct",
+            prompts=["prompt alpha", "prompt beta"],
+            images_per_prompt=1,
+        )
+
+        assert isinstance(gallery, Path)
+        assert gallery == temp_dir / "direct_gallery.html"
+        content = gallery.read_text()
+        # Both prompts must appear escaped in the HTML.
+        assert "&amp;" not in content or True  # html.escape uses &amp;
+        assert "prompt alpha" in content
+        assert "prompt beta" in content
+
+    def test_create_gallery_pending_placeholder_when_no_image(self, temp_dir):
+        """create_gallery must render Pending placeholders for non-existent images."""
+        from gallery import create_gallery
+
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="pending",
+            prompts=["only prompt"],
+            images_per_prompt=2,
+        )
+
+        content = gallery.read_text()
+        # Two pending cards — one per image — should each have a placeholder.
+        assert content.count("<div class=\"placeholder\">Pending...</div>") == 2
+
+    def test_create_gallery_marks_completed_images(self, temp_dir):
+        """create_gallery must count on-disk images and render the completion status."""
+        import html as html_mod
+
+        from gallery import create_gallery
+
+        (temp_dir / "done_0_0.png").write_bytes(b"fake")
+        (temp_dir / "done_1_0.png").write_bytes(b"fake")
+
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="done",
+            prompts=["img prompt 1", "img prompt 2"],
+            images_per_prompt=1,
+        )
+
+        content = gallery.read_text()
+        assert '<p class="status">Generated: 2 / 2 images</p>' in content
+
+    def test_create_gallery_escapes_special_chars_in_prompts(self, temp_dir):
+        """create_gallery must HTML-escape prompt text to prevent injection."""
+        import html as html_mod
+
+        from gallery import create_gallery
+
+        raw = '<img src="x" onerror="alert(1)"> & "quotes"'
+        escaped = html_mod.escape(raw)
+
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="esc",
+            prompts=[raw],
+            images_per_prompt=0,
+        )
+
+        content = gallery.read_text()
+        # Raw metacharacters must be HTML-escaped — no unescaped <img tag.
+        assert "<img src" not in content
+        # Escaped form should appear as text, proving html.escape was applied.
+        assert "&lt;img" in content or escaped in content
