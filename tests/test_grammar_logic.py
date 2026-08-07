@@ -339,3 +339,147 @@ def test_get_system_prompt_default_uses_project_templates():
         content = expected_file.read_text()
         result = get_system_prompt()  # default path
         assert result == content
+
+
+# ---------------------------------------------------------------------------
+# validate_grammar_structure — rejection paths (pure validation, no mocks)
+# ---------------------------------------------------------------------------
+
+def _make_grammar(**overrides):
+    """Build a minimal valid grammar; overrides replace the origin rule options."""
+    base = {
+        "origin": ["a cat", "a dog", "a bird", "a fish", "a horse"],
+        "kolors": [
+            "A sepia tone, soft grainy texture",
+            "A vibrant neon palette with high contrast",
+            "A muted grayscale with subtle blue undertones",
+            "A watercolor wash with pastel highlights",
+            "An oil painting style with rich layered brushstrokes",
+        ],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_validate_accepts_minimal_valid_grammar():
+    """A grammar with origin and one varying rule must pass validation."""
+    from grammar_generator import validate_grammar_structure
+    validate_grammar_structure(_make_grammar())  # no exception
+
+
+def test_validate_rejects_non_dict_input():
+    """Non-dict grammars (list, string) must be rejected immediately."""
+    from grammar_generator import validate_grammar_structure
+    with pytest.raises(ValueError):
+        validate_grammar_structure([])
+    with pytest.raises(ValueError):
+        validate_grammar_structure("not json")
+
+
+def test_validate_rejects_missing_origin():
+    """Grammars without the required 'origin' key must be rejected."""
+    from grammar_generator import validate_grammar_structure
+    bad = {"kolors": ["red", "blue", "green", "yellow", "purple"]}
+    with pytest.raises(ValueError, match='Grammar must be a JSON object containing an "origin"'):
+        validate_grammar_structure(bad)
+
+
+def test_validate_rejects_too_many_rules():
+    """Grammars exceeding 8 rules must be rejected."""
+    from grammar_generator import validate_grammar_structure
+    many = dict({"origin": ["a"]})
+    for i in range(9):
+        many[f"rule{i}"] = ["x"]
+    with pytest.raises(ValueError, match="Grammar must contain at most 8 rules"):
+        validate_grammar_structure(many)
+
+
+def test_validate_rejects_empty_rule_options():
+    """A rule pointing to an empty list must be rejected."""
+    from grammar_generator import validate_grammar_structure
+    bad = _make_grammar()
+    bad["kolors"] = []
+    with pytest.raises(ValueError, match="must be a non-empty array"):
+        validate_grammar_structure(bad)
+
+
+def test_validate_rejects_invalid_rule_names():
+    """Rule names containing spaces or starting with digits must be rejected."""
+    from grammar_generator import validate_grammar_structure
+    bad = _make_grammar()
+    bad["1badname"] = ["x", "y", "z", "w", "v"]
+    with pytest.raises(ValueError, match="rule name .* is invalid"):
+        validate_grammar_structure(bad)
+
+    bad2 = _make_grammar()
+    bad2["has space"] = ["x", "y", "z", "w", "v"]
+    with pytest.raises(ValueError, match="rule name .* is invalid"):
+        validate_grammar_structure(bad2)
+
+
+def test_validate_rejects_empty_string_options():
+    """Rule options that are empty strings or whitespace must be rejected."""
+    from grammar_generator import validate_grammar_structure
+    bad = _make_grammar()
+    bad["origin"] = ["a", "b", "", "d", "e"]
+    with pytest.raises(ValueError, match="must contain non-empty strings"):
+        validate_grammar_structure(bad)
+
+
+def test_validate_rejects_duplicate_alternatives():
+    """Rules containing duplicate options must be rejected."""
+    from grammar_generator import validate_grammar_structure
+    bad = _make_grammar()
+    bad["origin"] = ["a cat", "a dog", "a cat", "a bird", "a horse"]  # duplicate 'a cat'
+    with pytest.raises(ValueError, match="contains duplicate alternatives"):
+        validate_grammar_structure(bad)
+
+
+def test_validate_rejects_varying_rule_outside_five_to_seven():
+    """Varying rules must have between 5 and 7 alternatives inclusive."""
+    from grammar_generator import validate_grammar_structure
+
+    # Too few (4 options)
+    bad = _make_grammar()
+    bad["origin"] = ["a", "b", "c", "d"]
+    with pytest.raises(ValueError, match="must contain 5–7 alternatives"):
+        validate_grammar_structure(bad)
+
+    # Too many (8 options)
+    bad2 = _make_grammar()
+    bad2["origin"] = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    with pytest.raises(ValueError, match="must contain 5–7 alternatives"):
+        validate_grammar_structure(bad2)
+
+
+def test_validate_rejects_zero_varying_rules():
+    """A grammar where all rules have exactly one option must be rejected."""
+    from grammar_generator import validate_grammar_structure
+    bad = {"origin": ["just a cat"]}
+    with pytest.raises(ValueError, match="must contain at least one varying rule"):
+        validate_grammar_structure(bad)
+
+
+def test_validate_rejects_missing_rule_references():
+    """Rules that reference undefined rules via #name# syntax must be rejected."""
+    from grammar_generator import validate_grammar_structure
+    bad = _make_grammar()
+    bad["origin"] = ["a #phantom# cat", "a dog", "a bird", "a fish", "a horse"]
+    with pytest.raises(ValueError, match="missing rules: phantom"):
+        validate_grammar_structure(bad)
+
+
+def test_validate_accepts_valid_rule_references():
+    """Rules that reference defined rules via #name# syntax must pass."""
+    from grammar_generator import validate_grammar_structure
+    good = {
+        "origin": ["a #kolors# cat", "a dog", "a bird", "a fish", "a horse"],
+        "kolors": [
+            "sepia tone",
+            "neon palette",
+            "grayscale",
+            "watercolor",
+            "oil painting",
+        ],
+    }
+    validate_grammar_structure(good)  # no exception
