@@ -329,9 +329,9 @@ class TestSSEClient:
         functioning, even if connectSSE remains defined.
         """
         js = SSEClient.js()
-        assert "EventSource" in js, (
-            "The global EventSource constructor must be referenced in the "
-            "produced JS to establish SSE connections."
+        assert "new EventSource" in js, (
+            "SSEClient must construct a new EventSource instance to open the "
+            "stream; without it real-time updates would silently stop working."
         )
 
     def test_ping_handler_neutralizes_server_pings(self):
