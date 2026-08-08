@@ -1,5 +1,7 @@
 """Tests for html_components.py - shared HTML/CSS/JS components."""
 
+import re
+
 from html_components import (
     LogPanel,
     QueueStatusBar,
@@ -351,14 +353,6 @@ class TestSSEClient:
         )
 
 
-class TestButtons:
-    """Tests for Buttons component."""
-
-    def test_css_returns_string(self):
-        css = Buttons.css()
-        assert ".btn" in css
-
-
 class TestNavHeader:
     """Tests for NavHeader component."""
 
@@ -380,23 +374,66 @@ class TestStyleClasses:
         assert isinstance(css, str)
         assert len(css) > 0
 
+    def test_interactive_styles_composes_all_sections(self):
+        """InteractiveStyles.css() must include every sub-component's CSS section.
+
+        The class concatenates NavHeader, Buttons, LogPanel, ProgressBar CSS and a
+        body-padding rule. Losing any one of these sections silently breaks the
+        gallery layout (e.g., missing button styles make controls invisible). Each
+        selector must survive as a substring so regression cannot remove one without
+        the test catching it — mirroring the same defensive pattern used by other
+        component tests in this file.
+        """
+        css = InteractiveStyles.css()
+        assert ".nav-header" in css, "NavHeader CSS section must be composed."
+        assert ".btn-primary" in css, "Buttons CSS section must be composed."
+        assert ".log-panel" in css, "LogPanel CSS section must be composed."
+        assert ".progress-bar-fixed" in css, "ProgressBar CSS section must be composed."
+        assert "padding-bottom:" in css, (
+            "Body padding rule for fixed bars must be included so content is not "
+            "hidden behind the bottom status bar."
+        )
+
     def test_form_styles_css(self):
+        """FormStyles.css() must define every form selector used by the index page.
+
+        Losing any selector silently breaks a form element (e.g., missing .form-group
+        makes labels and inputs invisible). Each selector must survive as a substring
+        so regression cannot remove one without the test catching it — mirroring the
+        same defensive pattern used by other component tests in this file.
+        """
         css = FormStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
+        assert ".form-section" in css
+        assert ".form-row" in css
+        assert ".form-group" in css
 
     def test_gallery_styles_css(self):
+        """GalleryStyles.css() must define every gallery-specific selector.
+
+        GalleryStyles defines three gallery-specific style groups; losing any of
+        them silently breaks the user's gallery UI (action bar, grammar editor,
+        card actions). Each selector must survive as a substring so regression
+        cannot remove one without the test catching it — mirroring the same
+        defensive pattern used by other component tests in this file.
+        """
         css = GalleryStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
-        # GalleryStyles defines three gallery-specific style groups; losing any of
-        # them silently breaks the user's gallery UI (action bar, grammar editor,
-        # card actions). Each selector must survive as a substring.
         assert ".grammar-section-interactive" in css
         assert ".action-bar" in css
         assert ".card-actions" in css
 
     def test_index_styles_css(self):
+        """IndexStyles.css() must define the delete-button selector used on index cards.
+
+        The .btn-delete class is essential — it provides per-card deletion control.
+        Losing its CSS silently hides the button, removing a user-facing action.
+        Each selector below is a hard requirement verified as substring in CSS output.
+        """
         css = IndexStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
+        assert ".btn-delete" in css
+        assert "opacity: 1;" in css
