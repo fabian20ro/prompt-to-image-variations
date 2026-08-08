@@ -372,6 +372,26 @@ class TestStyleClasses:
         assert isinstance(css, str)
         assert len(css) > 0
 
+    def test_interactive_styles_composes_all_sections(self):
+        """InteractiveStyles.css() must include every sub-component's CSS section.
+
+        The class concatenates NavHeader, Buttons, LogPanel, ProgressBar CSS and a
+        body-padding rule. Losing any one of these sections silently breaks the
+        gallery layout (e.g., missing button styles make controls invisible). Each
+        selector must survive as a substring so regression cannot remove one without
+        the test catching it — mirroring the same defensive pattern used by other
+        component tests in this file.
+        """
+        css = InteractiveStyles.css()
+        assert ".nav-header" in css, "NavHeader CSS section must be composed."
+        assert ".btn-primary" in css, "Buttons CSS section must be composed."
+        assert ".log-panel" in css, "LogPanel CSS section must be composed."
+        assert ".progress-bar-fixed" in css, "ProgressBar CSS section must be composed."
+        assert "padding-bottom:" in css, (
+            "Body padding rule for fixed bars must be included so content is not "
+            "hidden behind the bottom status bar."
+        )
+
     def test_form_styles_css(self):
         css = FormStyles.css()
         assert isinstance(css, str)
