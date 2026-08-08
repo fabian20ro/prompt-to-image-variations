@@ -337,6 +337,120 @@ class TestRunFromGrammar:
         # Verify raw_response_file resolves to None when no .txt raw response exists
         assert captured_kwargs.get("raw_response_file") is None
 
+class TestRunFromGrammarText:
+    """Tests for run_from_grammar_text method - metadata shape characterization.
+
+    These tests verify structural contracts of the metadata written by
+    run_from_grammar_text — fields that downstream consumers depend on.
+    Losing any of these silently breaks gallery rendering or index generation.
+    """
+
+    @patch("pipeline.run_tracery")
+    @patch("pipeline.create_gallery")
+    @patch("pipeline.generate_master_index")
+    def test_source_field_always_present(self, mock_index, mock_gallery, mock_tracery, temp_dir):
+        """run_from_grammar_text must write a 'source' key to metadata.
+
+        Downstream consumers (e.g., gallery rendering) check the source field
+        to decide how to interpret the grammar file. Losing it silently forces
+        fallback defaults and loses provenance — users see 'unknown' instead of
+        knowing which pipeline step produced their prompts. The default value
+        is "from_grammar_text"; a custom source should override it when provided.
+        """
+        mock_tracery.return_value = ["prompt 1", "prompt 2"]
+        mock_gallery.return_value = temp_dir / "prompts" / "test_gallery.html"
+
+        with patch("pipeline.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "prompts"
+            mock_paths.prompts_dir.mkdir(parents=True)
+            mock_paths.generated_dir = temp_dir
+
+            executor = PipelineExecutor()
+            result = executor.run_from_grammar_text(
+                grammar='{"origin": ["test"]}',
+                count=2,
+                prefix="meta",
+                generate_images=False,
+            )
+
+        assert result.success is True
+        meta_file = result.output_dir / "meta.metaprompt.json"
+        with open(meta_file) as f:
+            meta_content = json.load(f)
+        assert "source" in meta_content
+        # Default source when none specified
+        assert meta_content["source"] == "from_grammar_text"
+
+    @patch("pipeline.run_tracery")
+    @patch("pipeline.create_gallery")
+    @patch("pipeline.generate_master_index")
+    def test_image_generation_always_written_to_metadata(self, mock_index, mock_gallery, mock_tracery, temp_dir):
+        """image_generation block must be present in metadata even when disabled.
+
+        Gallery rendering reads image_generation settings (width, height) from
+        the metadata file to lay out cards. If this key is missing when
+        generate_images=False, cards default to incorrect dimensions — breaking
+        gallery layout silently. The contract: always write the block; let
+        consumers check 'enabled' instead of checking existence.
+        """
+        mock_tracery.return_value = ["prompt 1"]
+        mock_gallery.return_value = temp_dir / "prompts" / "test_gallery.html"
+
+        with patch("pipeline.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "prompts"
+            mock_paths.prompts_dir.mkdir(parents=True)
+            mock_paths.generated_dir = temp_dir
+
+            executor = PipelineExecutor()
+            result = executor.run_from_grammar_text(
+                grammar='{"origin": ["test"]}',
+                count=1,
+                prefix="img_meta",
+                generate_images=False,  # explicitly disabled
+            )
+
+        assert result.success is True
+        meta_file = result.output_dir / "img_meta.metaprompt.json"
+        with open(meta_file) as f:
+            meta_content = json.load(f)
+        assert "image_generation" in meta_content
+        img_gen = meta_content["image_generation"]
+        # Must contain core settings consumers rely on
+        assert "enabled" in img_gen and img_gen["enabled"] is False
+        assert "width" in img_gen and "height" in img_gen
+
+    @patch("pipeline.run_tracery")
+    @patch("pipeline.create_gallery")
+    @patch("pipeline.generate_master_index")
+    def test_custom_source_overrides_default(self, mock_index, mock_gallery, mock_tracery, temp_dir):
+        """Custom source parameter must override the default 'from_grammar_text'."""
+        mock_tracery.return_value = ["prompt 1"]
+        mock_gallery.return_value = temp_dir / "prompts" / "test_gallery.html"
+
+        with patch("pipeline.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "prompts"
+            mock_paths.prompts_dir.mkdir(parents=True)
+            mock_paths.generated_dir = temp_dir
+
+            executor = PipelineExecutor()
+            result = executor.run_from_grammar_text(
+                grammar='{"origin": ["test"]}',
+                count=1,
+                prefix="src",
+                source="custom_import",
+                generate_images=False,
+            )
+
+        assert result.success is True
+        meta_file = result.output_dir / "src.metaprompt.json"
+        with open(meta_file) as f:
+            meta_content = json.load(f)
+        assert meta_content["source"] == "custom_import"
+
+
+class TestRunFromGrammar:
+    """Tests for run_from_grammar method."""
+
     def test_run_from_grammar_metadata_mismatch_fallback(self, temp_dir):
         """Test fallback to any metaprompt in the same directory if no direct match."""
         grammar_dir = temp_dir / "grammars_fallback"
