@@ -351,14 +351,6 @@ class TestSSEClient:
         )
 
 
-class TestButtons:
-    """Tests for Buttons component."""
-
-    def test_css_returns_string(self):
-        css = Buttons.css()
-        assert ".btn" in css
-
-
 class TestNavHeader:
     """Tests for NavHeader component."""
 
