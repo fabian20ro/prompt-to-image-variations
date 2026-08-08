@@ -393,22 +393,45 @@ class TestStyleClasses:
         )
 
     def test_form_styles_css(self):
+        """FormStyles.css() must define every form selector used by the index page.
+
+        Losing any selector silently breaks a form element (e.g., missing .form-group
+        makes labels and inputs invisible). Each selector must survive as a substring
+        so regression cannot remove one without the test catching it — mirroring the
+        same defensive pattern used by other component tests in this file.
+        """
         css = FormStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
+        assert ".form-section" in css
+        assert ".form-row" in css
+        assert ".form-group" in css
 
     def test_gallery_styles_css(self):
+        """GalleryStyles.css() must define every gallery-specific selector.
+
+        GalleryStyles defines three gallery-specific style groups; losing any of
+        them silently breaks the user's gallery UI (action bar, grammar editor,
+        card actions). Each selector must survive as a substring so regression
+        cannot remove one without the test catching it — mirroring the same
+        defensive pattern used by other component tests in this file.
+        """
         css = GalleryStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
-        # GalleryStyles defines three gallery-specific style groups; losing any of
-        # them silently breaks the user's gallery UI (action bar, grammar editor,
-        # card actions). Each selector must survive as a substring.
         assert ".grammar-section-interactive" in css
         assert ".action-bar" in css
         assert ".card-actions" in css
 
     def test_index_styles_css(self):
+        """IndexStyles.css() must define the delete-button selector used on index cards.
+
+        The .btn-delete class is essential — it provides per-card deletion control.
+        Losing its CSS silently hides the button, removing a user-facing action.
+        Each selector below is a hard requirement verified as substring in CSS output.
+        """
         css = IndexStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
+        assert ".btn-delete" in css
+        assert "opacity: 1;" in css
