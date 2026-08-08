@@ -1,5 +1,7 @@
 """Tests for html_components.py - shared HTML/CSS/JS components."""
 
+import re
+
 from html_components import (
     LogPanel,
     QueueStatusBar,
