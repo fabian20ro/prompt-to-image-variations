@@ -448,6 +448,53 @@ class TestBuildCardHtml:
         assert '>Enhance<' in html_out
 
 
+class TestInteractiveGrammarSection:
+    """Tests for _build_interactive_grammar_section rendering."""
+
+    def test_grammar_section_escapes_raw_input(self):
+        """_build_interactive_grammar_section must HTML-escape the grammar string inside the textarea."""
+        import html as html_mod
+
+        from gallery import _build_interactive_grammar_section
+
+        raw = '<{"key": "value"}> & <script>'
+        escaped = html_mod.escape(raw)
+
+        result = _build_interactive_grammar_section(raw, "run-42")
+
+        assert f'<textarea id="grammar-editor" class="grammar-editor">{escaped}</textarea>' in result
+        assert '<script>' not in result
+        assert 'class="grammar-section-interactive"' in result
+
+    def test_grammar_section_includes_all_action_buttons(self):
+        """The grammar section must expose undo, redo, save and regenerate buttons with correct IDs."""
+        from gallery import _build_interactive_grammar_section
+
+        result = _build_interactive_grammar_section("a{b}", "run-1")
+
+        assert 'id="btn-undo-grammar"' in result
+        assert 'id="btn-redo-grammar"' in result
+        assert 'id="btn-save-grammar"' in result
+        assert 'id="btn-regenerate"' in result
+        assert '>Undo<' in result
+        assert '>Redo<' in result
+        assert '>Save<' in result
+        assert '>Regenerate Prompts<' in result
+
+    def test_grammar_section_structure(self):
+        """The grammar section must render header, title, and collapsible history area."""
+        from gallery import _build_interactive_grammar_section
+
+        result = _build_interactive_grammar_section("test", "run-9")
+
+        assert 'class="grammar-header"' in result
+        assert '<span class="grammar-title">Tracery Grammar</span>' in result
+        assert 'class="grammar-actions"' in result
+        assert '<details class="grammar-history">' in result
+        assert '<summary>Grammar History</summary>' in result
+        assert 'id="grammar-history-list"' in result
+
+
 class TestCreateGallery:
     """Tests for create_gallery standalone behavior."""
 
