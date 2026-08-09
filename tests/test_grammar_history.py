@@ -324,6 +324,43 @@ class TestAppendGrammarRotation:
         assert history[0]["action"] == "initial"
         assert history[0]["grammar"] == "rule_first"
 
+    def test_dedup_uses_stripped_comparison_for_grammar(self, run_dir):
+        """Dedup compares grammar via .strip() — leading/trailing whitespace must be ignored.
+
+        The dedup gate at line 71 uses `last.get("grammar", "").strip() == grammar.strip()`.
+        This test characterizes that a stored entry with trailing whitespace is correctly
+        recognized as identical to the new input, preventing spurious append on whitespace-only
+        changes. Without this assertion the contract would rely solely on an implicit behavior;
+        future refactorers might accidentally weaken .strip() to == or vice versa.
+        """
+        # First: store with clean grammar
+        append_grammar_revision(run_dir, "dedup_strip_test", grammar="rule_a", action="initial")
+        history = append_grammar_revision(
+            run_dir, "dedup_strip_test", grammar="  rule_a  ", action="initial"
+        )
+        assert len(history) == 1  # dedup matched via strip()
+
+    def test_dedup_matches_when_stored_entry_has_leading_whitespace(self, run_dir):
+        """Dedup must recognize a previously-stored entry as duplicate even when it contains leading whitespace.
+
+        The stored entry has leading whitespace (e.g., from LLM output with indent);
+        the new grammar is clean. Both .strip() equal "rule_a" — dedup triggers, no append.
+        This characterizes that strip()-based comparison works symmetrically in both directions
+        of the == check on line 71: `last.get("grammar", "").strip()` AND `grammar.strip()`.
+        """
+        path = _history_path(run_dir, "dedup_stored_ws")
+        import json as _json
+        # Pre-seed a stored entry with leading whitespace in grammar field
+        malformed_history = [
+            {"id": "old", "created_at": "2024-01-01T00:00:00", "action": "initial", "grammar": "  rule_a  "},
+        ]
+        path.write_text(_json.dumps(malformed_history))
+
+        history = append_grammar_revision(
+            run_dir, "dedup_stored_ws", grammar="rule_a", action="initial"
+        )
+        assert len(history) == 1  # dedup matched despite leading whitespace in stored entry
+
     def test_rotation_persists_to_disk(self, run_dir):
         for i in range(10):
             append_grammar_revision(run_dir, "test", grammar=f"rule_{i}", action="update")
