@@ -299,9 +299,22 @@ def clean_grammar_output(grammar: str) -> str:
 
     # Remove markdown code blocks and extract content
     # Handle ```json, ```tracery, or plain ``` markers (with or without newline)
-    code_block_match = re.search(r'```(?:json|tracery)?\s*(.*?)```', grammar, flags=re.DOTALL | re.IGNORECASE)
-    if code_block_match:
-        grammar = code_block_match.group(1)
+    code_block_matches = re.findall(r'```(?:json|tracery)?\s*(.*?)```', grammar, flags=re.DOTALL | re.IGNORECASE)
+
+    if len(code_block_matches) == 1:
+        grammar = code_block_matches[0]
+    elif code_block_matches:
+        # Try each extracted block; return the first one that parses as valid JSON.
+        for candidate in code_block_matches:
+            try:
+                json.loads(candidate.strip())
+                grammar = candidate
+                break
+            except (json.JSONDecodeError, ValueError):
+                continue
+        else:
+            # No block parsed — fall back to the last extracted block (best effort)
+            grammar = code_block_matches[-1]
 
     grammar = grammar.strip()
 
