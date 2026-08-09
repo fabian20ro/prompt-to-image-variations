@@ -99,6 +99,15 @@ class TestGalleryService:
         service = GalleryService(temp_dir, temp_dir)
         assert service.get_prefix(temp_dir) == "image"
 
+    def test_get_prefix_metadata_exists_no_prefix_key(self, temp_dir):
+        """Test get_prefix returns 'image' when metadata exists but lacks 'prefix' key."""
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps({
+            "user_prompt": "a cat",
+        }))
+
+        service = GalleryService(temp_dir, temp_dir)
+        assert service.get_prefix(temp_dir) == "image"
+
     def test_load_grammar_success(self, temp_dir):
         """Test loading grammar."""
         grammar = {"origin": ["#subject#"], "subject": ["cat"]}
