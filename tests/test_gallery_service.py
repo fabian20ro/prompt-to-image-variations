@@ -476,3 +476,16 @@ class TestRunSummary:
         summary = service.get_run_summary("run")
 
         assert summary["is_backup"] is True
+
+    def test_get_run_summary_empty_existing_directory(self, temp_dir):
+        """Test get_run_summary with an existing but empty run directory (no metadata)."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+
+        service = GalleryService(temp_dir, temp_dir)
+        summary = service.get_run_summary("run")
+
+        assert summary["prefix"] == "image"
+        assert summary["prompt_count"] == 0
+        assert summary["image_count"] == 0
+        assert summary["is_backup"] is False

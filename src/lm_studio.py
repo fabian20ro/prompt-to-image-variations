@@ -39,6 +39,12 @@ def unload_all_models(timeout: float = 60.0) -> None:
         except subprocess.TimeoutExpired as exc:
             last_exc = LMStudioUnloadError("Timed out unloading LM Studio models")
             if attempt < _MAX_RETRIES - 1:
+                logger.info(
+                    "LM Studio unload attempt %d/%d timed out, retrying in %.1fs",
+                    attempt + 2,
+                    _MAX_RETRIES,
+                    _BACKOFF_SECONDS[attempt],
+                )
                 time.sleep(_BACKOFF_SECONDS[attempt])
                 continue
             raise last_exc

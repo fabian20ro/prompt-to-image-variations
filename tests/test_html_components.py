@@ -329,9 +329,9 @@ class TestSSEClient:
         functioning, even if connectSSE remains defined.
         """
         js = SSEClient.js()
-        assert "EventSource" in js, (
-            "The global EventSource constructor must be referenced in the "
-            "produced JS to establish SSE connections."
+        assert "new EventSource" in js, (
+            "SSEClient must construct a new EventSource instance to open the "
+            "stream; without it real-time updates would silently stop working."
         )
 
     def test_ping_handler_neutralizes_server_pings(self):
@@ -350,6 +350,19 @@ class TestSSEClient:
         ), (
             "A ping event listener must be registered to prevent server heartbeats "
             "from exhausting the retry budget during healthy connections."
+        )
+        # Both quote-style forms must parse — confirms the handler is actually
+        # wired and not just a dead string/comment that would pass the bare
+        # substring check above while silently failing at runtime.
+        assert ("addEventListener('ping'" in js) or ('addEventListener("ping"' in js), (
+            "Ping handler registration must use valid JS quote syntax so it is "
+            "actually invoked by the browser."
+        )
+        # The handler body must be empty — a non-empty ping handler would do
+        # actual work on every heartbeat and could trigger reconnection itself.
+        assert "() =>" in js, (
+            "Ping handler must have an empty no-op body so heartbeats are truly "
+            "neutralized without side effects."
         )
 
 
