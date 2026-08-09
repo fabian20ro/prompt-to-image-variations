@@ -8,6 +8,25 @@ to improve maintainability and reduce code duplication.
 class LogPanel:
     """Log panel component for displaying generation logs."""
 
+    REQUIRED_HTML_IDS = ("log-panel", "log-content", "log-count", "btn-clear-logs")
+
+    @classmethod
+    def validate(cls) -> None:
+        """Assert the produced HTML contains every required element ID.
+
+        Raises ValueError if any critical DOM node is missing — which would break
+        JavaScript bindings in log panel consumers. Calling this after editing
+        LogPanel.html() catches regressions (e.g., renaming an id or removing a
+        required button) before they reach production galleries.
+        """
+        produced = cls.html()
+        for element_id in cls.REQUIRED_HTML_IDS:
+            if f'id="{element_id}"' not in produced and f"id='{element_id}'" not in produced:
+                raise ValueError(
+                    f"LogPanel HTML is missing required element id='{element_id}'. "
+                    f"The panel will silently fail to bind JavaScript event handlers."
+                )
+
     @staticmethod
     def html() -> str:
         """Build the collapsible log panel HTML."""
