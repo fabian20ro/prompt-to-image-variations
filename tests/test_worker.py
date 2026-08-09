@@ -522,6 +522,25 @@ class TestWorkerExecuteTask:
         )
 
     @pytest.mark.asyncio
+    async def test_execute_task_handles_stdout_eof_without_json(self, worker):
+        """Test that a subprocess exiting without producing any stdout output fails the task."""
+        task = MockTask()
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[b""],
+            stderr_lines=[b""],
+            return_code=1,
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            await worker._execute_task(task)
+
+        # With no JSON result and non-zero exit code, should use fallback exit code message
+        worker.queue_manager.fail_task.assert_called_once()
+        call_args = worker.queue_manager.fail_task.call_args[0]
+        assert call_args[1] == "Process exited with code 1"
+
+    @pytest.mark.asyncio
     async def test_execute_task_json_error_overrides_stderr(self, worker):
         """Test that JSON-detected failure takes precedence over non-zero exit stderr."""
         task = MockTask()
