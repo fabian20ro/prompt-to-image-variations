@@ -279,8 +279,16 @@ class MetadataManager:
                 elif key in data:
                     del data[key]
 
-            # Save back
-            meta_file.write_text(json.dumps(data, indent=2))
+            # Save back atomically (tempfile + os.replace) — matches save() pattern
+            fd, tmp_path = tempfile.mkstemp(prefix=f".{meta_file.name}.", dir=str(run_dir))
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_path, meta_file)
+            except BaseException:
+                if Path(tmp_path).exists():
+                    Path(tmp_path).unlink()
+                raise
             return RunMetadata.from_dict(data)
 
         except json.JSONDecodeError as e:
