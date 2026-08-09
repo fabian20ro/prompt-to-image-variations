@@ -421,6 +421,29 @@ class TestGalleryService:
 
         assert result is True
 
+    def test_validate_file_access_at_base_boundary(self, temp_dir):
+        """Test validate_file_access accepts paths exactly at the base directory root."""
+        file_path = temp_dir / "file.txt"
+        file_path.touch()
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.validate_file_access(file_path, temp_dir)
+
+        assert result is True
+
+    def test_validate_file_access_nested_deep_traversal(self, temp_dir):
+        """Test validate_file_access rejects paths that escape via ../ in deep nesting."""
+        inside_dir = temp_dir / "deep" / "nested"
+        inside_dir.mkdir(parents=True)
+        safe_file = inside_dir / "safe.txt"
+        safe_file.touch()
+
+        outside_path = (temp_dir / ".." / "etc" / "passwd").resolve()
+
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(ValueError, match="Access denied"):
+            service.validate_file_access(outside_path, temp_dir)
+
 
 class TestRunSummary:
     """Tests for get_run_summary."""
