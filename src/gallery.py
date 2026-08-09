@@ -134,7 +134,7 @@ def _build_card_html(
       <div class="prompt">{escaped_prompt}</div>{action_buttons}
     </div>'''
     else:
-        return f'''    <div class="card" data-image="{image_filename}" data-prompt-idx="{prompt_idx}" data-image-idx="{image_idx}" aria-label="Generating: {escaped_prompt}" aria-busy="true">
+        return f'''    <div class="card" data-image="{image_filename}" data-prompt-idx="{prompt_idx}" data-image-idx="{image_idx}" role="status" aria-label="Generating: {escaped_prompt}" aria-busy="true">
       <div class="placeholder">Pending...</div>
       <div class="prompt">{escaped_prompt}</div>{action_buttons}
     </div>'''
