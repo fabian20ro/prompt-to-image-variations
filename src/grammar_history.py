@@ -85,6 +85,7 @@ def append_grammar_revision(
 
 def get_recent_revisions(
     history: list[dict], n: int = 10, *, include_action: bool | None = False,
+    action_filter: str | None = None,
 ) -> list[dict]:
     """Return the last ``n`` entries from ``history``.
 
@@ -94,6 +95,9 @@ def get_recent_revisions(
             negative value to receive a shallow copy of the entire history.
         include_action: When True, each returned entry is reduced to only its
             ``action`` key; when False (default), full entries are returned.
+        action_filter: Optional filter — only entries whose ``action`` field equals
+            this string are included in the result. A non-matching value returns an
+            empty list. Defaults to ``None`` (no filtering).
 
     Returns:
         A new list containing at most ``n`` recent revisions (or all entries).
@@ -102,6 +106,9 @@ def get_recent_revisions(
         result = list(history)
     else:
         result = history[-n:]
+
+    if action_filter is not None and isinstance(result, list):
+        result = [e for e in result if e.get("action") == action_filter]
 
     if include_action and isinstance(result, list):
         return [{"action": e.get("action")} for e in result]
