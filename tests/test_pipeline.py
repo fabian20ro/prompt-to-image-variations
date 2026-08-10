@@ -238,10 +238,20 @@ class TestRunFullPipeline:
         assert meta_content["user_prompt"] == "test prompt"
         assert "created_at" in meta_content
 
+    @patch("pipeline.generate_master_index")
+    @patch("pipeline.create_gallery")
+    @patch("pipeline.run_tracery")
     @patch("pipeline.generate_grammar")
-    def test_run_full_pipeline_grammar_failure(self, mock_grammar, temp_dir):
-        """Test handling of grammar generation failure."""
-        from tracery_runner import TraceryError
+    def test_run_full_pipeline_grammar_failure(
+        self, mock_grammar, mock_tracery, mock_gallery, mock_index, temp_dir
+    ):
+        """Test handling of grammar generation failure.
+
+        Verifies early-return behavior: when generate_grammar fails the pipeline
+        must short-circuit without invoking downstream functions (tracery expansion,
+        gallery creation, master index update). The error message must match the
+        exact production format so a different exception class is caught as a regression.
+        """
         mock_grammar.side_effect = Exception("LM Studio not available")
 
         with patch("pipeline.paths") as mock_paths:
@@ -251,7 +261,12 @@ class TestRunFullPipeline:
             result = executor.run_full_pipeline(prompt="test", count=1)
 
         assert result.success is False
-        assert "Grammar generation failed" in result.error
+        # Exact format match — catches regression in error message construction
+        assert result.error == "Grammar generation failed: LM Studio not available"
+        # Verify pipeline short-circuits without downstream side effects
+        mock_tracery.assert_not_called()
+        mock_gallery.assert_not_called()
+        mock_index.assert_not_called()
 
     @patch("pipeline.generate_grammar")
     @patch("pipeline.run_tracery")
