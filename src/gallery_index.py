@@ -89,17 +89,20 @@ def _extract_run_info(run_dir: Path, is_archive: bool = False) -> dict | None:
     Returns:
         Dictionary with run info, or None if not a valid run
     """
-    # Find metadata file
-    meta_files = []
-    for pattern in ["*.metaprompt.json", "*_metadata.json"]:
-        meta_files = list(run_dir.glob(pattern))
-        if meta_files:
-            break
+    # Find metadata file - prefer {prefix}.metaprompt.json pattern
+    meta_files = list(run_dir.glob("*.metaprompt.json")) + list(
+        run_dir.glob("*_metadata.json")
+    )
+
     if not meta_files:
         return None
 
+    # Prefer files matching common prefix patterns when multiple exist
+    preferred = [f for f in meta_files if "image" in f.name or "prefix" in f.name]
+    chosen_file = preferred[0] if preferred else meta_files[0]
+
     try:
-        metadata = json.loads(meta_files[0].read_text())
+        metadata = json.loads(chosen_file.read_text())
     except (json.JSONDecodeError, IOError):
         return None
 
