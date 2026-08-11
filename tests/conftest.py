@@ -280,6 +280,23 @@ def test_create_run_files_no_images_when_flag_false(temp_dir):
         assert not img_path.exists()
 
 
+def test_create_run_files_returns_input_path(temp_dir):
+    """Verify create_run_files returns exactly the run_dir path passed to it."""
+    prefix = "return_check"
+    input_path = temp_dir / "return_check_dir"
+
+    returned = create_run_files(
+        input_path,
+        prefix=prefix,
+        num_prompts=1,
+    )
+
+    # The function must return the same Path identity used as its argument;
+    # callers depend on this (e.g. test_full_run_dir_fixture relies on it).
+    assert returned == input_path
+    assert isinstance(returned, Path)
+
+
 def test_saved_dir_fixture(temp_dir):
     """Verify saved_dir fixture returns a 'saved' subdirectory under temp_dir."""
     saved = temp_dir / "saved"
