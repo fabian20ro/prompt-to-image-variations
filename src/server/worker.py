@@ -132,11 +132,18 @@ class Worker:
             )
         except asyncio.TimeoutError:
             if self._current_process:
-                self._current_process.terminate()
                 try:
+                    self._current_process.terminate()
                     await asyncio.wait_for(self._current_process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    self._current_process.kill()
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    # Force kill if graceful termination did not complete
+                    try:
+                        self._current_process.kill()
+                        await asyncio.wait_for(
+                            self._current_process.wait(), timeout=2.0
+                        )
+                    except Exception:
+                        pass  # best-effort cleanup; task already failed
             self.queue_manager.fail_task(
                 task.id, f"Task exceeded timeout of {self.task_timeout:.0f}s"
             )

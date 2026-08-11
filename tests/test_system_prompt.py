@@ -177,3 +177,49 @@ def test_system_prompt_limits_rule_count():
     assert "at most 8 rules" in prompt, (
         "Rule count cap missing from system prompt — grammars could balloon unbounded"
     )
+
+
+def test_system_prompt_enforces_no_negative_prompt():
+    """Verify the template explicitly forbids negative prompts for ERNIE.
+
+    ERNIE-Image-Turbo has no negative-prompt input, so exclusions must be stated
+    concretely in the positive prompt itself. This guardrail prevents models from
+    emitting invalid negative-prompt syntax into expanded prompts.
+    """
+    prompt = get_system_prompt()
+    assert (
+        "no negative-prompt" in prompt
+    ), "ERNIE no-negative-prompt constraint missing from system prompt"
+
+
+def test_system_prompt_enforces_varying_rule_minimum():
+    """Verify the template requires at least one varying rule with 7 alternatives.
+
+    The grammar must have variation to produce diverse outputs; a single-option grammar
+    defeats the purpose of Tracery expansion. The minimum alternative count (7) prevents
+    degenerate grammars that would collapse into identical outputs.
+    """
+    prompt = get_system_prompt()
+    for invariant in [
+        "exactly 7",
+        "distinct, coherent alternatives",
+        "at least one varying rule",
+    ]:
+        assert (
+            invariant in prompt
+        ), f"Varying-rule minimum requirement missing from system prompt: {invariant}"
+
+
+def test_system_prompt_requires_concrete_position_vocabulary():
+    """Verify the template mandates concrete spatial language instead of vague placement.
+
+    The model must use explicit directional vocabulary (left/right, foreground/background)
+    rather than loose terms like 'around' or 'nearby'. This ensures spatial descriptions
+    are precise enough for image generation to interpret correctly.
+    """
+    prompt = get_system_prompt()
+    assert "concrete positions" in prompt, "Concrete position requirement missing from system prompt"
+    for direction in ["left/right", "foreground/background"]:
+        assert (
+            direction in prompt
+        ), f"Direction vocabulary requirement missing: {direction}"

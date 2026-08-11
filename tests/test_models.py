@@ -8,6 +8,7 @@ from server.models import (
     Task,
     QueueState,
     TaskProgress,
+    TaskResponse,
     GenerateRequest,
     GenerateFromGrammarRequest,
     RegeneratePromptsRequest,

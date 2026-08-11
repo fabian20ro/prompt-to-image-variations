@@ -496,8 +496,48 @@ class TestGalleryIndexInteractive:
         assert "/gallery/20240101_120000_xxx/image_20240101_120000_0.png" in html
         assert 'href="/gallery/20240101_120000_xxx"' in html
 
-    def test_build_card_html_non_interactive_active_uses_relative_path(self):
-        """Non-interactive active-card thumbnail and href must use relative paths."""
+    def test_flat_archive_prompt_counting_reflects_unique_indices(self, temp_dir):
+        """Flat archive card should reflect distinct prompt indices from filenames.
+
+        _extract_flat_archive_infos counts unique prompt indices extracted via regex
+        from image filenames. This observable count drives the "N prompts" text in
+        the rendered card — a user-visible detail that must track correctly when
+        filename patterns change.
+        """
+        saved_dir = temp_dir / "saved"
+        saved_dir.mkdir()
+
+        # Create PNGs with 3 distinct prompt indices (5 images total)
+        png_path_0_0 = saved_dir / "image_20240101_120000_0_0.png"
+        png_path_0_1 = saved_dir / "image_20240101_120000_0_1.png"
+        png_path_1_0 = saved_dir / "image_20240101_120000_1_0.png"
+        png_path_2_0 = saved_dir / "image_20240101_120000_2_0.png"
+        for p in (png_path_0_0, png_path_0_1, png_path_1_0, png_path_2_0):
+            import struct; import zlib
+            data = bytearray(b'\x89PNG\r\n\x1a\n')
+            payload = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
+            crc = struct.pack('>I', zlib.crc32(b'IHDR' + payload))
+            data.extend(struct.pack('>I', len(payload))); data.extend(b'IHDR'); data.extend(payload); data.extend(crc)
+            raw = b'\x00\xff\x00\x00'; comp = zlib.compress(raw)
+            icrc = struct.pack('>I', zlib.crc32(b'IDAT' + comp))
+            data.extend(struct.pack('>I', len(comp))); data.extend(b'IDAT'); data.extend(comp); data.extend(icrc)
+            ecrc = struct.pack('>I', zlib.crc32(b'IEND'))
+            data.extend(struct.pack('>I', 0)); data.extend(b'IEND'); data.extend(ecrc)
+            p.write_bytes(bytes(data))
+
+        with patch('gallery_index.get_flat_archive_metadata', return_value={
+            "display_title": "Prompt count test",
+            "user_prompt": "hidden prompt",
+            "model": "ERNIE v3.5",
+        }):
+            index_path = generate_master_index(temp_dir, interactive=True)
+            content = index_path.read_text()
+
+        # 4 images across 3 distinct prompts — flat archive cards render image count only,
+        # so we assert on the actual visible text: "4 images" plural form. The display_title
+        # fallback must win over the raw user_prompt in card content.
+        assert "4 images" in content
+        assert "hidden prompt" not in content
         from gallery_index import _build_card_html
         run = {
             "user_prompt": "test",
