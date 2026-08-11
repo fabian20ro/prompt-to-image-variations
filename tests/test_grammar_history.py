@@ -500,6 +500,31 @@ class TestAppendGrammarMalformedHistory:
 
 
 class TestGetRecentRevisions:
+    def test_action_filter_keeps_only_matching_recent_entries(self):
+        history = [
+            {"id": "r0", "action": "initial", "grammar": "g0"},
+            {"id": "r1", "action": "update", "grammar": "g1"},
+            {"id": "r2", "action": "rollback", "grammar": "g2"},
+            {"id": "r3", "action": "update", "grammar": "g3"},
+        ]
+
+        result = get_recent_revisions(history, n=3, action_filter="update")
+
+        assert [entry["id"] for entry in result] == ["r1", "r3"]
+
+    def test_action_filter_composes_with_action_only_projection(self):
+        history = [
+            {"id": "r0", "action": "initial", "grammar": "g0"},
+            {"id": "r1", "action": "update", "grammar": "g1"},
+            {"id": "r2", "action": "update", "grammar": "g2"},
+        ]
+
+        result = get_recent_revisions(
+            history, n=10, action_filter="update", include_action=True
+        )
+
+        assert result == [{"action": "update"}, {"action": "update"}]
+
     def test_include_action_none_returns_full_entries(self):
         """include_action=None must return full entries (like False, not like True).
 

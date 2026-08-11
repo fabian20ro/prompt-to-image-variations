@@ -21,6 +21,53 @@ from server.models import (
 )
 
 
+class TestRegeneratePromptsRequest:
+    """Tests for RegeneratePromptsRequest — internal queue model."""
+
+    def test_regenerate_prompts_request_defaults(self):
+        """Test RegeneratePromptsRequest with required fields only."""
+        req = RegeneratePromptsRequest(run_id="run-123", grammar='{"origin": ["x"]}')
+        assert req.run_id == "run-123"
+        assert req.grammar == '{"origin": ["x"]}'
+        assert req.count is None
+
+    def test_regenerate_prompts_request_count_unbounded(self):
+        """Test that count accepts any int including 0 and negative (no ge/le constraint)."""
+        # RegeneratePromptsRequest.count has no bounds — unlike RegeneratePromptsApiRequest.
+        req = RegeneratePromptsRequest(run_id="r", grammar='{"origin": ["x"]}', count=0)
+        assert req.count == 0
+
+        req = RegeneratePromptsRequest(run_id="r", grammar='{"origin": ["x"]}', count=-5)
+        assert req.count == -5
+
+        # None is allowed (default)
+        req_none = RegeneratePromptsRequest(run_id="r", grammar='{"origin": ["x"]}')
+        assert req_none.count is None
+
+    def test_regenerate_prompts_request_valid_fields(self):
+        """Test setting valid field values."""
+        from pydantic import ValidationError
+
+        req = RegeneratePromptsRequest(
+            run_id="run-abc",
+            grammar='{"origin": ["test"]}',
+            count=50,
+        )
+        assert req.run_id == "run-abc"
+        assert req.grammar == '{"origin": ["test"]}'
+        assert req.count == 50
+
+    def test_regenerate_prompts_request_extra_fields_accepted(self):
+        """Test that unknown fields are silently ignored (no forbid config)."""
+        from pydantic import ValidationError
+
+        # RegeneratePromptsRequest has no ConfigDict(extra="forbid") — extras dropped.
+        req = RegeneratePromptsRequest(
+            run_id="r", grammar='{"origin": ["x"]}', bogus_field=42
+        )
+        assert req.run_id == "r"
+
+
 class TestModels:
     """Tests for Pydantic models."""
 
