@@ -83,6 +83,9 @@ def generate_image(
     if height % 8 != 0:
         raise ValueError(f"Height must be a multiple of 8, got {height}.")
 
+    if seed is not None and seed < 0:
+        raise ValueError(f"Seed must be non-negative, got {seed}.")
+
     if seed is None:
         seed = random.randint(0, 2**32 - 1)
 

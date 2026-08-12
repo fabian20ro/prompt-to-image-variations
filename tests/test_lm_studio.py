@@ -179,3 +179,28 @@ class TestUnloadAllModels:
             with pytest.raises(OSError) as exc_info:
                 unload_all_models()
             assert "device busy" in str(exc_info.value)
+
+    def test_succeeds_when_stderr_present_on_returncode_zero(self):
+        """Successful subprocess completion (returncode==0) must not raise
+        even when stderr contains non-empty content — the function should
+        accept success and ignore output on success."""
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stderr = "retrying"
+
+        success_result = MagicMock(returncode=0, stderr="model unloaded with warnings")
+        success_result.stdout = ""
+
+        call_count = [0]
+
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 1:
+                return fail_result
+            return success_result
+
+        with patch("lm_studio.shutil.which", return_value="/usr/bin/lms"), \
+             patch("lm_studio.subprocess.run", side_effect=side_effect), \
+             patch("lm_studio.time.sleep"):
+            unload_all_models()
+            assert call_count[0] == 2
