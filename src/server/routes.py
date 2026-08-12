@@ -375,6 +375,9 @@ async def get_gallery_info(
             except (ValueError, IndexError):
                 pass
 
+    # Sort images by prompt_idx then image_idx for consistent display order
+    images.sort(key=lambda x: (x["prompt_idx"], x["image_idx"]))
+
     return GalleryDetailResponse(
         info=GalleryInfo(
             run_id=run_id,
