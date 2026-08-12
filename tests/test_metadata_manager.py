@@ -168,6 +168,18 @@ class TestMetadataManager:
         assert result["prefix"] == "test"
         assert result["custom"] == "value"
 
+    def test_load_raw_not_found(self, temp_dir):
+        """Test loading raw when no metadata file exists."""
+        with pytest.raises(MetadataNotFoundError, match="No metadata file found"):
+            MetadataManager.load_raw(temp_dir)
+
+    def test_load_raw_invalid_json(self, temp_dir):
+        """Test loading raw metadata with invalid JSON."""
+        (temp_dir / "test.metaprompt.json").write_text("{invalid json")
+
+        with pytest.raises(MetadataError, match="Invalid JSON"):
+            MetadataManager.load_raw(temp_dir)
+
     def test_save_with_dict(self, temp_dir):
         """Test saving metadata from dictionary."""
         data = {"prefix": "myprefix", "count": 10}
@@ -349,6 +361,25 @@ class TestMetadataManager:
         assert saved["source"] == "pipeline"
         # Other fields must be preserved — not lost by the update path
         assert saved["prefix"] == "test"
+        assert saved["count"] == 5
+
+    def test_update_none_for_missing_key_is_silent_noop(self, temp_dir):
+        """Test that passing None for a key absent from metadata is silent.
+
+        When the update supplies None for a key not present in the existing JSON,
+        the elif branch at line 279 does nothing — the key stays absent and no error
+        is raised. This matches the delete-branch behavior in metadata_manager.py's
+        update loop: `elif key in data: del data[key]`.
+        """
+        initial = {"prefix": "test", "count": 5}
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        result = MetadataManager.update(temp_dir, nonexistent_key=None)
+
+        # No error raised — silent noop
+        assert isinstance(result, RunMetadata)
+        saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
+        assert "nonexistent_key" not in saved
         assert saved["count"] == 5
 
     def test_get_prefix(self, temp_dir):
