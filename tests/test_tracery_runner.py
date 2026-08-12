@@ -203,6 +203,12 @@ class TestRunTracery:
         results = run_tracery("{invalid", count=0)
         assert results == []
 
+    def test_parse_grammar_non_dict_json(self):
+        """Test that parse_grammar passes through non-dict JSON (no validation)."""
+        # parse_grammar only calls json.loads — it does not validate the result is a dict.
+        result = parse_grammar("[]")
+        assert isinstance(result, list)
+
     def test_run_tracery_complex_grammar(self):
         """Test with a more complex grammar."""
         grammar_json = json.dumps({
