@@ -302,3 +302,35 @@ def test_get_model_skips_tiling_by_default(mock_settings, temp_dir):
         _get_model(tiled_vae=False)
 
     assert not hasattr(instance.tiling_config, "_mock_name") or instance.tiling_config is None or "TilingConfig" not in str(type(instance.tiling_config))
+
+
+@patch("image_generator._get_model")
+@patch("image_generator.unload_all_models")
+def test_generate_image_forwards_empty_prompt(mock_unload, mock_get_model, temp_dir):
+    """An empty prompt must be forwarded unchanged to model.generate_image."""
+    generated = MagicMock()
+    model = MagicMock()
+    model.generate_image.return_value = generated
+    mock_get_model.return_value = model
+
+    generate_image("", temp_dir / "image.png", seed=1)
+
+    assert (
+        model.generate_image.call_args.kwargs["prompt"] == ""
+    ), "empty prompt must be forwarded unchanged"
+
+
+@patch("image_generator._get_model")
+@patch("image_generator.unload_all_models")
+def test_generate_image_tiled_vae_not_in_generation_kwargs(mock_unload, mock_get_model, temp_dir):
+    """tiled_vae affects model loading only; it must not appear in model.generate_image kwargs."""
+    generated = MagicMock()
+    model = MagicMock()
+    model.generate_image.return_value = generated
+    mock_get_model.return_value = model
+
+    generate_image("test", temp_dir / "image.png", seed=1, tiled_vae=True)
+
+    assert (
+        "tiled_vae" not in model.generate_image.call_args.kwargs
+    ), "tiled_vae must only influence _get_model, never the generation call"
