@@ -382,6 +382,41 @@ class TestMetadataManager:
         assert "nonexistent_key" not in saved
         assert saved["count"] == 5
 
+    def test_update_multi_key_mixed_types(self, temp_dir):
+        """Test updating multiple keys of different types in a single call.
+
+        When update() receives mixed scalar and dict updates simultaneously,
+        each key must be processed independently — scalar overwrites must not
+        interfere with dict merges on other keys. This exercises both branches
+        of the isinstance guard logic (lines 273-280) in one atomic operation.
+        """
+        initial = {
+            "prefix": "test",
+            "count": 5,
+            "user_prompt": "original prompt",
+            "image_generation": {"enabled": True, "width": 1024},
+        }
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        result = MetadataManager.update(
+            temp_dir, count=99, user_prompt=None, image_generation={"height": 768}
+        )
+
+        # Scalar overwrite: count must be updated to new value
+        assert result.count == 99
+        saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
+        assert saved["count"] == 99
+
+        # Key deletion via None: user_prompt must be removed from disk
+        assert "user_prompt" not in saved
+
+        # Dict merge: enabled preserved, height added, width updated
+        assert result.image_generation["enabled"] is True
+        assert result.image_generation["width"] == 1024
+        assert result.image_generation["height"] == 768
+        # Other fields must be preserved — not lost by the update loop
+        assert saved["prefix"] == "test"
+
     def test_get_prefix(self, temp_dir):
         """Test getting prefix from metadata."""
         (temp_dir / "myprefix.metaprompt.json").write_text('{"prefix": "myprefix"}')
