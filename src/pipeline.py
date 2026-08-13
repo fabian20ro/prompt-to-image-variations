@@ -315,21 +315,22 @@ class PipelineExecutor:
             },
         }
 
-        if generate_images:
-            metadata["image_generation"] = {
-                "enabled": True,
-                "model": MODEL_NAME,
-                "steps": INFERENCE_STEPS,
-                "guidance": GUIDANCE,
-                "width": width,
-                "height": height,
-                "quantize": QUANTIZATION,
-                "images_per_prompt": images_per_prompt,
-                "max_prompts": max_prompts,
-                "seed": seed,
-                "enhance": enhance,
-                "enhance_softness": enhance_softness if enhance else None,
-            }
+        # Always write image_generation block for downstream consistency —
+        # consumers (gallery layout, regenerate) read these keys unconditionally.
+        metadata["image_generation"] = {
+            "enabled": generate_images,
+            "model": MODEL_NAME,
+            "steps": INFERENCE_STEPS,
+            "guidance": GUIDANCE,
+            "width": width,
+            "height": height,
+            "quantize": QUANTIZATION,
+            "images_per_prompt": images_per_prompt,
+            "max_prompts": max_prompts,
+            "seed": seed,
+            "enhance": enhance,
+            "enhance_softness": enhance_softness if enhance else None,
+        }
 
         # Save metadata and grammar
         metadata_file = output_dir / f"{prefix}.metaprompt.json"
