@@ -138,6 +138,63 @@ def test_hash_prompt_schema_versioned():
 
     assert hash_new != hash_original
 
+
+def test_cache_invalidation_on_schema_change(tmp_path, monkeypatch):
+    """Cache invalidation: after schema version changes, old cached grammar must be unreachable.
+
+    The prompt hash is constructed as ``sha256(f"{PROMPT_SCHEMA_VERSION}:{user_prompt}")[:12]``.
+    When ``PROMPT_SCHEMA_VERSION`` changes (e.g., an ERNIE model upgrade), the same user
+    prompt produces a different hash, so previously cached grammars become cache misses and
+    must be regenerated. This test verifies that contract end-to-end:
+
+    1. Cache a grammar under schema v2.
+    2. Change schema to v3 (simulating an ERNIE upgrade).
+    3. Verify the same prompt now hashes differently — proving the old cache entry is
+       unreachable through normal ``generate_grammar`` / ``get_cached_grammar`` lookups.
+
+    This is critical: without this invalidation, stale grammars from prior schema versions
+    could silently serve as cached results, producing inconsistent output across model upgrades.
+    """
+    mock_cache_dir = tmp_path / "grammars"
+    mock_cache_dir.mkdir()
+    monkeypatch.setattr("src.grammar_generator.CACHE_DIR", mock_cache_dir)
+
+    user_prompt = "a dragon flying over mountains at sunset"
+
+    # Step 1: Cache a grammar under the current schema version
+    original_schema = grammar_gen.PROMPT_SCHEMA_VERSION
+    prompt_hash_v2 = hash_prompt(user_prompt)
+    test_grammar = '{"origin": ["#a#", "2", "3", "4", "5", "6"], "a": ["dragon"]}'
+    raw_response = '```json\n' + test_grammar + '\n```'
+
+    # Manually cache the grammar (simulating a successful generation under v2)
+    grammar_gen.cache_grammar(prompt_hash_v2, test_grammar, raw_response, user_prompt)
+    assert get_cached_grammar(prompt_hash_v2) == test_grammar
+
+    # Step 2: Change schema version (simulating ERNIE model upgrade)
+    monkeypatch.setattr("src.grammar_generator.PROMPT_SCHEMA_VERSION", "ernie-v3")
+
+    # Step 3: Verify cache invalidation — the old hash no longer matches
+    prompt_hash_v3 = hash_prompt(user_prompt)
+    assert prompt_hash_v3 != prompt_hash_v2, (
+        "Schema version change must produce a different hash to ensure cache invalidation"
+    )
+
+    # The cached grammar under v2 is now unreachable — it's keyed by the old hash
+    # which no longer matches any lookup using the new schema
+    assert get_cached_grammar(prompt_hash_v3) is None, (
+        "Old cached grammar must not be retrievable via new-schema hash"
+    )
+
+    # The v2 cache entry still exists physically but is logically invalidated
+    old_cache_file = mock_cache_dir / f"{prompt_hash_v2}.tracery.json"
+    assert old_cache_file.exists(), (
+        "Old cached file should still exist on disk — invalidation is hash-based, not deletion"
+    )
+
+    # Reset schema to avoid affecting other tests in the suite
+    monkeypatch.setattr("src.grammar_generator.PROMPT_SCHEMA_VERSION", original_schema)
+
 def test_hash_prompt_emojis():
     # Test that hash_prompt handles emojis correctly
     prompt = "a beautiful sunset 🌅 over the mountains 🏔️"
