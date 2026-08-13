@@ -365,13 +365,16 @@ class TestGalleryService:
 
         assert meta_file.name == "test_metadata.json"
 
-    def test_get_metadata_file_nonexistent_run_dir(self, temp_dir):
-        """Test get_metadata_file raises MetadataNotFoundError for missing directory."""
-        nonexistent = temp_dir / "does_not_exist"
+    def test_get_metadata_file_no_matching_patterns_in_existing_dir(self, temp_dir):
+        """Test get_metadata_file raises MetadataNotFoundError when no matching patterns exist."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        # Only non-matching files — neither *.metaprompt.json nor *_metadata.json
+        (run_dir / "some_other_file.txt").write_text("data")
 
         service = GalleryService(temp_dir, temp_dir)
-        with pytest.raises(MetadataNotFoundError, match="No metadata file found"):
-            service.get_metadata_file(nonexistent)
+        with pytest.raises(MetadataNotFoundError, match=f"No metadata file found in {run_dir}"):
+            service.get_metadata_file(run_dir)
 
     def test_get_metadata_file_both_patterns_match(self, temp_dir):
         """Test get_metadata_file returns a metaprompt file when both patterns have files."""
