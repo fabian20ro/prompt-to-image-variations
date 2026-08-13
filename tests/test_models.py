@@ -586,6 +586,11 @@ class TestGenerateAllImagesRequest:
         req = GenerateAllImagesRequest(max_prompts=50)
         assert req.max_prompts == 50
 
+    def test_generate_all_images_max_prompts_upper_bound(self):
+        """Test that max_prompts upper bound is respected (no le= limit in model)."""
+        req = GenerateAllImagesRequest(max_prompts=9999)
+        assert req.max_prompts == 9999
+
 
 class TestGenerateImageRequest:
     """Tests for GenerateImageRequest image_idx validation."""
