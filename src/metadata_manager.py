@@ -229,6 +229,8 @@ class MetadataManager:
 
         meta_file = run_dir / f"{prefix}.metaprompt.json"
 
+        logger.info("Saving metadata to %s", str(meta_file))
+
         try:
             run_dir.mkdir(parents=True, exist_ok=True)
             fd, tmp_path = tempfile.mkstemp(prefix=f".{meta_file.name}.", dir=str(run_dir))
