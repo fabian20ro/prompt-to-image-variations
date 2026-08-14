@@ -509,6 +509,8 @@ class TestUtils:
         long_text = "x" * 10000  # well over 8KB in UTF-8
         result = _truncate_for_png(long_text, "prompt")
         assert len(result.encode()) <= PNG_TEXT_MAX_BYTES
+        # Verify actual truncation occurred (not just that the result is within limits)
+        assert result != long_text
 
     def test_truncate_for_png_preserves_unicode(self):
         """Test truncation preserves UTF-8 characters at the boundary."""

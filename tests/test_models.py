@@ -722,3 +722,96 @@ class TestGenerateImageRequestExtraFields:
         req2 = GenerateImageRequest(image_idx=0, bogus_field="should be ignored")
         assert req2.image_idx == 0
         # Extra fields are silently dropped — no error raised
+
+
+class TestGenerateImageRequestBoundaries:
+    """Tests for GenerateImageRequest image_idx bounds (ge=0, le=1000)."""
+
+    def test_generate_image_request_default_image_idx(self):
+        req = GenerateImageRequest()
+        assert req.image_idx == 0
+
+    def test_generate_image_request_image_idx_zero_boundary(self):
+        from pydantic import ValidationError
+
+        # Zero is allowed (ge=0)
+        req = GenerateImageRequest(image_idx=0)
+        assert req.image_idx == 0
+
+        # Negative rejected
+        with pytest.raises(ValidationError):
+            GenerateImageRequest(image_idx=-1)
+
+    def test_generate_image_request_image_idx_upper_boundary(self):
+        from pydantic import ValidationError
+
+        # Upper boundary (le=1000) is allowed
+        req = GenerateImageRequest(image_idx=1000)
+        assert req.image_idx == 1000
+
+        # Over limit rejected
+        with pytest.raises(ValidationError):
+            GenerateImageRequest(image_idx=1001)
+
+
+class TestEnhanceImageRequestBoundaries:
+    """Tests for EnhanceImageRequest image_idx and softness bounds."""
+
+    def test_enhance_image_request_default_values(self):
+        req = EnhanceImageRequest()
+        assert req.image_idx == 0
+        assert req.softness == 0.5
+
+    def test_enhance_image_request_image_idx_boundaries(self):
+        from pydantic import ValidationError
+
+        # Lower boundary (ge=0)
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(image_idx=-1)
+
+        req = EnhanceImageRequest(image_idx=0)
+        assert req.image_idx == 0
+
+        # Upper boundary (le=1000)
+        req = EnhanceImageRequest(image_idx=1000)
+        assert req.image_idx == 1000
+
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(image_idx=1001)
+
+    def test_enhance_image_request_softness_boundaries(self):
+        from pydantic import ValidationError
+
+        # Lower boundary (ge=0.0)
+        req = EnhanceImageRequest(softness=0.0)
+        assert req.softness == 0.0
+
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(softness=-0.01)
+
+        # Upper boundary (le=1.0)
+        req = EnhanceImageRequest(softness=1.0)
+        assert req.softness == 1.0
+
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(softness=1.01)
+
+
+class TestSeedValidation:
+    """Tests for GenerateRequest seed constraint (ge=0)."""
+
+    def test_seed_zero_is_valid(self):
+        from pydantic import ValidationError
+
+        req = GenerateRequest(prompt="test", seed=0)
+        assert req.seed == 0
+
+    def test_seed_negative_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", seed=-1)
+
+    def test_seed_default_is_none(self):
+        req = GenerateRequest(prompt="test")
+        assert req.seed is None

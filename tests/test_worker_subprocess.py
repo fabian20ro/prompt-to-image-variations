@@ -355,6 +355,27 @@ class TestRunGenerateFromGrammar:
         assert result["success"] is True
         mock_executor.run_from_grammar_text.assert_called_once()
 
+    @patch("server.worker_subprocess.create_executor")
+    def test_run_generate_from_grammar_failure(self, mock_exec, capsys):
+        """Test grammar import failure emits error JSON."""
+        from pipeline import PipelineResult
+
+        mock_executor = MagicMock()
+        mock_executor.run_from_grammar_text.return_value = PipelineResult(
+            success=False,
+            error="Grammar validation failed",
+        )
+        mock_exec.return_value = mock_executor
+
+        run_generate_from_grammar({"grammar": "{}", "title": "Fail"})
+
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split('\n')
+        result = json.loads(lines[-1])
+
+        assert result["success"] is False
+        assert "validation" in result["error"].lower()
+
 
 class TestRunRegeneratePrompts:
     """Tests for run_regenerate_prompts handler."""
