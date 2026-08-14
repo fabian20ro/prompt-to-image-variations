@@ -417,6 +417,20 @@ class TestBuildCardHtml:
         assert "<img" not in html
         assert "prompt-only text" in html
 
+    def test_build_card_prompt_only_renders_action_buttons_when_interactive(self):
+        """When interactive=True a prompt-only card must include Generate and Enhance buttons."""
+        from gallery import _build_card_html
+
+        html = _build_card_html("pp_0.png", "prompt-only text", 0, 0, exists=False, no_image_expected=True, interactive=True)
+
+        assert 'class="card-actions"' in html
+        assert '<button class="btn-small btn-primary"' in html
+        assert '<button class="btn-small btn-secondary"' in html
+        assert "generateImage(this, 0, 0)" in html
+        assert "enhanceImage(this, 0, 0)" in html
+        assert '>Generate<' in html
+        assert '>Enhance<' in html
+
     def test_build_card_pending_renders_action_buttons_when_interactive(self):
         """When interactive=True a pending card must include Generate and Enhance buttons."""
         from gallery import _build_card_html
