@@ -209,6 +209,15 @@ class TestRunTracery:
         result = parse_grammar("[]")
         assert isinstance(result, list)
 
+    def test_run_tracery_empty_rule_value(self):
+        """Test grammar with empty string as rule value returns empty strings."""
+        # Tracery handles [""] rule values by producing "" output for that origin.
+        grammar_json = json.dumps({"origin": [""]})
+        results = run_tracery(grammar_json, count=3)
+
+        assert len(results) == 3
+        assert all(r == "" for r in results)
+
     def test_run_tracery_complex_grammar(self):
         """Test with a more complex grammar."""
         grammar_json = json.dumps({
