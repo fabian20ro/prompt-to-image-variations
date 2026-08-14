@@ -559,10 +559,14 @@ class TestStdinPrompt:
         assert "{origin: [\"test\"]}" not in result.output  # Just verifying it got the prompt text through
 
     def test_stdin_empty_prompt_errors(self, monkeypatch):
-        """Test that empty stdin gives an error."""
+        """Test that empty stdin gives an error with exit code 1 and stderr message."""
         runner = CliRunner()
         result = runner.invoke(main, ["--prompt", "-"], input="")
-        assert "empty prompt" in result.output.lower() or "Error" in result.output
+
+        assert result.exit_code == 1
+        captured = result.output.splitlines()
+        # click.echo(err=True) writes to stderr; CliRunner captures it in .output
+        assert any("Error: empty prompt read from stdin" in line for line in captured)
 
     def test_stdin_with_full_pipeline(self, monkeypatch):
         """Test that stdin works with the full pipeline."""

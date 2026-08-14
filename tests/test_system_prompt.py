@@ -223,3 +223,34 @@ def test_system_prompt_requires_concrete_position_vocabulary():
         assert (
             direction in prompt
         ), f"Direction vocabulary requirement missing: {direction}"
+
+
+def test_system_prompt_requires_verbatim_user_constraint_preservation():
+    """Verify the template explicitly requires preserving user constraints verbatim.
+
+    The system prompt must instruct the model to keep every explicit user constraint
+    exactly as provided — only unspecified details should vary. This prevents models from
+    silently dropping or rephrasing hard constraints supplied by the caller.
+    """
+    prompt = get_system_prompt()
+    assert (
+        "Preserve every explicit user constraint verbatim" in prompt
+    ), "Verbatim preservation of user constraints missing from system prompt"
+
+
+def test_system_prompt_example_uses_correct_json_structure():
+    """Verify the template's example grammar demonstrates proper Tracery JSON format.
+
+    The concrete compact example on line 45 shows the expected output structure with
+    an origin rule, varying rules with alternatives, and hash-delimited references.
+    This structural demonstration confirms the format contract is communicated to the model.
+    """
+    prompt = get_system_prompt()
+    # Example must show proper JSON with double-quoted keys/values
+    assert '"origin":[' in prompt or '"origin":[\\' in prompt, (
+        "Example grammar missing origin rule structure"
+    )
+    # Must demonstrate hash-reference format used by Tracery
+    assert "#rule#" in prompt or "#subject#" in prompt or "#details#" in prompt, (
+        "Example grammar not demonstrating hash-reference Tracery format"
+    )

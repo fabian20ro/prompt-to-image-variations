@@ -476,3 +476,27 @@ class TestEnvVarDocs:
         assert "# Environment Variables\n" in content
         for key in ENV_VAR_DOCS:
             assert f"# {key}" in content
+
+    def test_generate_env_example_accepts_custom_subset(self):
+        """Test that generate_env_example writes only the subset of env vars passed as argument.
+
+        Mirrors test_format_env_docs_custom_dict for format_env_docs(): when a partial
+        dict is passed, only those keys should appear in the output file. This exercises
+        the delegation path through format_env_docs with non-default input.
+        """
+        from config import generate_env_example, ENV_VAR_DOCS, format_env_docs
+
+        partial = {k: v for k, v in ENV_VAR_DOCS.items() if "LM_STUDIO" in k}
+        result = generate_env_example(partial)
+
+        assert result.exists()
+
+        content = result.read_text()
+        expected = format_env_docs(partial)
+        assert content == expected
+
+        # Verify only the subset keys are present
+        for key in partial:
+            assert f"# {key}" in content
+        # And non-LM_STUDIO keys should NOT be present
+        assert "PROMPT_GEN_DEFAULT_WIDTH" not in content

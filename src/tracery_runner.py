@@ -64,10 +64,12 @@ def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin") -> 
         return []
 
     grammar_dict = parse_grammar(grammar_json)
+    grammar = tracery.Grammar(grammar_dict)
+    grammar.add_modifiers(base_english)
 
     results = []
     for _ in range(count):
-        text = generate_one(grammar_dict, origin)
+        text = grammar.flatten(f"#{origin}#")
         results.append(text)
 
     return results
