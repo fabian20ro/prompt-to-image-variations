@@ -182,6 +182,8 @@ class TestEnhanceImage:
         assert call_kwargs["softness"] == 0.7
         assert call_kwargs["image_path"] == str(image_path)
         mock_result.save.assert_called_once_with(path=str(output_path), overwrite=True)
+        # Verify resolution is always ScaleFactor(2) for 2x upscaling (line 116 of image_enhancer.py)
+        mock_scale_factor.assert_called_once_with(2)
 
     @patch("image_enhancer._get_enhancer")
     @patch("image_enhancer.unload_all_models")
