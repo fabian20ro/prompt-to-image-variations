@@ -515,3 +515,45 @@ class TestEmitLog:
         assert len(events) == 1
         assert events[0][0] == "task_log"
         assert state.current_task is not None  # task unchanged
+
+
+class TestNotifyImageReady:
+    """Tests for QueueManager.notify_image_ready."""
+
+    def test_notify_image_ready_emits_event(self, queue_path):
+        """notify_image_ready should emit an 'image_ready' event with the correct payload."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+
+        # Ignore add_task notifications.
+        task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test"})
+        events.clear()
+
+        qm.notify_image_ready("run-abc", "/output/img.png")
+
+        assert len(events) == 1
+        event_type, payload = events[0]
+        assert event_type == "image_ready"
+        assert payload["run_id"] == "run-abc"
+        assert payload["path"] == "/output/img.png"
+
+    def test_notify_image_ready_does_not_mutate_state(self, queue_path):
+        """notify_image_ready should not change any queue state."""
+        qm = QueueManager(queue_path)
+        task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test"})
+        qm.get_next_task()
+
+        original_pending_count = len(qm.get_state().pending)
+        original_completed_count = len(qm.get_state().completed)
+
+        qm.notify_image_ready("run-xyz", "/output/img2.png")
+
+        state = qm.get_state()
+        assert len(state.pending) == original_pending_count
+        assert len(state.completed) == original_completed_count
+        assert state.current_task is not None  # current task unchanged
