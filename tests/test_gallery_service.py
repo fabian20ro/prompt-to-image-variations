@@ -397,6 +397,19 @@ class TestGalleryService:
         with pytest.raises(json.JSONDecodeError):
             service.load_metadata(temp_dir)
 
+    def test_load_metadata_empty_object(self, temp_dir):
+        """Test loading metadata from a valid empty JSON object returns empty dict."""
+        (temp_dir / "test.metaprompt.json").write_text("{}")
+
+        service = GalleryService(temp_dir, temp_dir)
+        metadata = service.load_metadata(temp_dir)
+
+        assert isinstance(metadata, dict)
+        assert metadata == {}
+        # No prefix key should fall back to default when consumed downstream,
+        # but load_metadata itself returns the raw parsed dict.
+        assert "prefix" not in metadata
+
     def test_load_prompts_nonexistent_directory(self, temp_dir):
         """Test load_prompts returns empty list for missing directory."""
         nonexistent = temp_dir / "does_not_exist"
