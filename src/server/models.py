@@ -90,6 +90,8 @@ class RegeneratePromptsRequest(BaseModel):
 
 class RegeneratePromptsApiRequest(BaseModel):
     """API request to regenerate prompts (run_id and grammar from URL/file)."""
+    model_config = ConfigDict(extra="forbid")
+
     grammar: str | None = None
     count: int | None = Field(None, ge=1, le=10000)
     images_per_prompt: int | None = Field(None, ge=0, le=100)
