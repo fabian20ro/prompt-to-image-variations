@@ -619,6 +619,36 @@ class TestGrammarStructureValidation(unittest.TestCase):
                 "1subject": ["fox", "owl", "hare", "badger", "deer"],
             })
 
+    def test_rejects_empty_option_strings(self):
+        # An option that is empty or whitespace-only after stripping cannot be
+        # rendered by Tracery — the validator must surface this so LLM output
+        # with trailing whitespace in alternatives is rejected before caching.
+        with self.assertRaisesRegex(ValueError, "must contain non-empty strings"):
+            validate_grammar_structure({
+                "origin": ["#subject#"],
+                "subject": ["fox", "", "hare", "badger", "deer"],
+            })
+
+    def test_rejects_multiple_missing_references(self):
+        # When LM Studio references multiple undefined rules, the validator must
+        # report all of them so callers see a complete error instead of one at a
+        # time — fixing typos becomes deterministic.
+        with self.assertRaisesRegex(ValueError, "missing rules: light, subject"):
+            validate_grammar_structure({
+                "origin": ["A #subject# in #light#."],
+                "color": ["red", "blue", "green", "yellow", "black"],
+            })
+
+    def test_rejects_locked_origin_referencing_missing_rule(self):
+        # Even when origin is a fixed string (not varying), any #rule# references
+        # must resolve to existing rules — the validator walks all options regardless
+        # of whether the rule is locked, preventing silent rendering failures.
+        with self.assertRaisesRegex(ValueError, "missing rules: subject"):
+            validate_grammar_structure({
+                "origin": ["A #subject#."],
+                "color": ["red", "blue", "green", "yellow", "black"],
+            })
+
 
 if __name__ == "__main__":
     unittest.main()
