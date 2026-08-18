@@ -137,6 +137,22 @@ class TestGalleryService:
 
         assert result is None
 
+    def test_load_grammar_auto_detects_existing_grammar_returns_content(self, temp_dir):
+        """Test load_grammar returns grammar content when auto-detecting prefix and file exists."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "cat.metaprompt.json").write_text(json.dumps({"prefix": "cat"}))
+        (run_dir / "cat_grammar.json").write_text(
+            json.dumps({"origin": ["#subject#"], "subject": ["dragon"]})
+        )
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.load_grammar(run_dir)  # auto-detects prefix from metadata
+
+        assert result is not None
+        assert '"origin"' in result
+        assert '"subject"' in result
+
     def test_get_grammar_file_explicit_prefix(self, temp_dir):
         """Test get_grammar_file with explicit prefix returns correct path."""
         run_dir = temp_dir / "run"
