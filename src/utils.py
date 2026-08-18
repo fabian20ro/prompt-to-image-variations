@@ -178,6 +178,14 @@ def _truncate_for_png(value: str, key: str) -> str:
             f"Truncating '{key}' from {len(encoded)} to {PNG_TEXT_MAX_BYTES} bytes "
             f"for PNG text chunk embedding"
         )
+        # Trim trailing bytes until UTF-8 decode succeeds without error,
+        # preserving more content when multi-byte chars are at the boundary.
+        for cut in range(PNG_TEXT_MAX_BYTES + 1):
+            try:
+                return encoded[:PNG_TEXT_MAX_BYTES - cut].decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        # All slices failed — last resort, same as before but deterministic.
         return encoded[:PNG_TEXT_MAX_BYTES].decode("utf-8", errors="ignore")
     return value
 
