@@ -76,11 +76,19 @@ class TestUnloadAllModels:
     def test_timeout_on_final_attempt_raises(self):
         timeout_exc = subprocess.TimeoutExpired(cmd=["lms", "unload", "--all"], timeout=60)
 
+        call_count = [0]
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            raise timeout_exc
+
         with patch("lm_studio.shutil.which", return_value="/usr/bin/lms"), \
-             patch("lm_studio.subprocess.run", side_effect=lambda *a, **kw: (_ for _ in ()).throw(timeout_exc)), \
-             patch("lm_studio.time.sleep"):
+             patch("lm_studio.subprocess.run", side_effect=side_effect), \
+             patch("lm_studio.time.sleep") as sleep_mock:
             with pytest.raises(LMStudioUnloadError) as exc_info:
                 unload_all_models()
+            assert call_count[0] == 3
+            assert sleep_mock.call_count == 2
+            assert [a.args[0] for a in sleep_mock.call_args_list] == [1.0, 2.0]
             assert "Timed out" in str(exc_info.value)
 
     def test_uses_stdout_when_stderr_empty_on_failure(self):
