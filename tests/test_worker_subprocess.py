@@ -537,6 +537,45 @@ class TestRunGenerateAllImages:
         assert result["success"] is True
         assert result["data"]["generated"] == 3
 
+    def test_run_generate_all_images_metadata_error_fallback(self, capsys):
+        """Test that MetadataError in run_generate_all_images falls back to default prefix."""
+        from conftest import create_run_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompts_dir = Path(tmpdir) / "prompts"
+            prompts_dir.mkdir(parents=True)
+            run_dir = prompts_dir / "test-run"
+            run_dir.mkdir(parents=True)
+            create_run_files(run_dir, prefix="test", num_prompts=2)
+
+            with patch("server.worker_subprocess.paths") as mock_paths:
+                mock_paths.prompts_dir = prompts_dir
+
+                with patch(
+                    "server.worker_subprocess.MetadataManager.load",
+                    side_effect=MetadataError("metadata not found"),
+                ):
+                    mock_executor = MagicMock()
+                    mock_executor.generate_all_images.return_value = PipelineResult(
+                        success=True,
+                        run_id="test-run",
+                        image_count=2,
+                        skipped_count=0,
+                    )
+
+                    with patch("server.worker_subprocess.create_executor") as mock_exec:
+                        mock_exec.return_value = mock_executor
+                        run_generate_all_images({
+                            "run_id": "test-run",
+                            "images_per_prompt": 1,
+                        })
+
+            captured = capsys.readouterr()
+            lines = [l for l in captured.out.strip().split("\\n") if l]
+            result = json.loads(lines[-1])
+            assert result["success"] is True
+            assert result["data"]["generated"] == 2
+
 
 class TestRunEnhanceAllImages:
     """Tests for run_enhance_all_images handler."""
