@@ -41,6 +41,11 @@ class TestUtils:
         result = format_run_timestamp("20240115-143022")
         assert result == "20240115-143022"
 
+    def test_format_run_timestamp_rejects_non_digit_payload(self):
+        """Timestamp-shaped garbage must remain unchanged."""
+        result = format_run_timestamp("2024abcd_12x000")
+        assert result == "2024abcd_12x000"
+
     def test_format_run_timestamp_empty(self):
         """Test that empty string returns empty."""
         result = format_run_timestamp("")
