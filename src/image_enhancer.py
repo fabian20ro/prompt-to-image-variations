@@ -77,15 +77,21 @@ def enhance_image(
     if not (0.0 <= softness <= 1.0):
         raise ValueError("softness must be between 0.0 and 1.0")
 
+    MAX_DIMENSION = 16384
+
     if width is not None:
         if width <= 0:
             raise ValueError("Width must be positive.")
+        if width > MAX_DIMENSION:
+            raise ValueError(f"Width must not exceed {MAX_DIMENSION}.")
         if width % 8 != 0:
             raise ValueError("Width must be a multiple of 8.")
 
     if height is not None:
         if height <= 0:
             raise ValueError("Height must be positive.")
+        if height > MAX_DIMENSION:
+            raise ValueError(f"Height must not exceed {MAX_DIMENSION}.")
         if height % 8 != 0:
             raise ValueError("Height must be a multiple of 8.")
 

@@ -40,7 +40,7 @@ def format_run_timestamp(timestamp: str) -> str:
     Returns:
         Formatted timestamp or original if format doesn't match
     """
-    if len(timestamp) == 15 and timestamp[8] == "_":
+    if len(timestamp) == 15 and timestamp[8] == "_" and re.fullmatch(r"\d{4}\d{2}\d{2}_\d{2}\d{2}\d{2}", timestamp):
         return (
             f"{timestamp[0:4]}-{timestamp[4:6]}-{timestamp[6:8]} "
             f"{timestamp[9:11]}:{timestamp[11:13]}:{timestamp[13:15]}"
