@@ -76,6 +76,8 @@ class ImageGenerationConfig:
             raise ValueError("default_width must be positive")
         if self.default_height <= 0:
             raise ValueError("default_height must be positive")
+        if self.seed < 0:
+            raise ValueError("seed must be non-negative")
 
 @dataclass(frozen=True)
 class ServerConfig:
