@@ -46,6 +46,14 @@ class GalleryService:
         base_dir = self.saved_dir if is_archive else self.prompts_dir
         run_dir = base_dir / run_id
 
+        # Reject paths that traverse outside the gallery directory (e.g. ".." or symlinks).
+        try:
+            file_path = run_dir.resolve()
+            file_path.relative_to(base_dir.resolve())
+        except ValueError:
+            location = "Archive" if is_archive else "Gallery"
+            raise GalleryNotFoundError(f"{location} not found: {run_id}")
+
         if not run_dir.exists():
             location = "Archive" if is_archive else "Gallery"
             raise GalleryNotFoundError(f"{location} not found: {run_id}")
