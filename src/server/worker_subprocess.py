@@ -536,6 +536,10 @@ def main():
     task_type = task.get("type")
     params = task.get("params", {})
 
+    if task_type is None:
+        emit_result(False, error="Missing 'type' field in task JSON")
+        sys.exit(1)
+
     handler = TASK_HANDLERS.get(task_type)
     if handler is None:
         emit_result(False, error=f"Unknown task type: {task_type}")
