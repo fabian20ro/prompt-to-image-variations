@@ -463,6 +463,20 @@ class TestArchiveFileEndpoint:
         assert response.status_code == 403
         assert "Access denied" in response.json()["detail"]
 
+    def test_archive_file_serves_valid_png(self, client, temp_dir):
+        """Test serving a valid PNG from archive."""
+        saved_dir = temp_dir / "saved"
+        run_id = "20240101_120000_abc123"
+        run_dir = saved_dir / run_id
+        run_dir.mkdir()
+
+        png_path = run_dir / "test_0_0.png"
+        png_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"fake png data")
+
+        response = client.get(f"/archive/{run_id}/test_0_0.png")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+
 
 class TestGalleryFileEndpoint:
     """Tests for /gallery/{run_id}/{filename:path} endpoint."""
