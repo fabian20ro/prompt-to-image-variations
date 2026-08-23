@@ -312,17 +312,25 @@ class TestQueueManager:
         assert state.current_task.pid == 9999
 
     def test_update_task_pid_ignores_wrong_id(self, queue_path):
-        """update_task_pid should not mutate state when the task id is wrong."""
+        """update_task_pid should not mutate state or emit events when the task id is wrong."""
         qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
         task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test"})
         qm.get_next_task()
+        qm.update_task_pid(task.id, 7777)
 
-        original_state = qm.get_state().current_task.pid
+        events.clear()
+
         qm.update_task_pid("nonexistent-id", 1234)
 
         state = qm.get_state()
-        assert state.current_task.id == task.id
-        assert state.current_task.pid == original_state
+        assert state.current_task.pid == 7777  # Known value preserved exactly
+        assert len(events) == 0  # No spurious notification emitted for wrong id
 
     def test_update_task_pid_no_current_task(self, queue_path):
         """update_task_pid should be a no-op when the queue is empty."""
