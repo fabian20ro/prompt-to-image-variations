@@ -351,6 +351,32 @@ def test_enhance_image_invalid_softness(softness):
             enhance_image(img_path, out_path, softness=softness)
 
 
+@pytest.mark.parametrize("softness", [0.0, 1.0])
+def test_enhance_image_valid_boundary_softness_forwarded(softness):
+    """Test that the inclusive softness boundaries (0.0, 1.0) are accepted and forwarded."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    from PIL import Image
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path, softness=softness)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["softness"] == softness
+
+
 @pytest.mark.parametrize("width", [0, -4, 7])
 def test_enhance_image_invalid_width(width):
     from image_enhancer import enhance_image
