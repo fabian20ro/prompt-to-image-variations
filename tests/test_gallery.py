@@ -296,6 +296,63 @@ class TestGalleryInteractive:
         assert '<img src="' in content
         assert "alt=" not in content or 'alt=""' in content
 
+    def test_update_gallery_preserves_adjacent_cards_untouched(self, temp_dir):
+        """update_gallery must only replace the target placeholder, leaving sibling cards intact."""
+        run_dir = temp_dir
+        prefix = "test_adjacent"
+        gallery_path = run_dir / f"{prefix}_gallery.html"
+
+        # Build a multi-card gallery where card-0 is pending and card-1 is already completed.
+        gallery_path.write_text(f'''<div class="card" data-image="{prefix}_0_0.png">
+          <div class="placeholder">Pending...</div>
+          <div class="prompt">Card 0 prompt</div></div>
+        <div class="card" data-image="{prefix}_1_0.png">
+          <a href="{prefix}_1_0.png"><img src="{prefix}_1_0.png" alt="Card 1 prompt"></a>
+          <div class="prompt">Card 1 text</div></div>
+        <p class="status">Generated: 0 / 2 images</p>''')
+
+        image_path = run_dir / f"{prefix}_0_0.png"
+        image_path.write_text("new data")
+
+        from gallery import update_gallery
+        update_gallery(gallery_path, image_path, "Target prompt", 1, 2)
+
+        content = gallery_path.read_text()
+
+        # The target card must have been updated (placeholder replaced with img).
+        assert '<img src="' in content
+        assert f'alt="Target prompt"' in content
+
+        # Card-1 — which was already completed — must remain untouched.
+        assert '<a href="test_adjacent_1_0.png">' in content
+        assert 'Card 1 text' in content
+        assert 'Card 0 prompt' in content
+
+        # Status count must reflect the new completion state.
+        assert '<p class="status">Generated: 1 / 2 images</p>' in content
+
+    def test_update_gallery_does_not_corrupt_cards_without_placeholder(self, temp_dir):
+        """update_gallery is a no-op for cards that already lack a placeholder div."""
+        run_dir = temp_dir
+        prefix = "test_no_ph"
+        gallery_path = run_dir / f"{prefix}_gallery.html"
+
+        # Card has an <img> but no "Pending..." placeholder — the regex should not match.
+        gallery_path.write_text(f'''<div class="card" data-image="{prefix}_0_0.png">
+          <a href="{prefix}_0_0.png"><img src="{prefix}_0_0.png" alt="original"></a>
+          <p class="status">Generated: 1 / 1 images</p></div>''')
+
+        image_path = run_dir / f"{prefix}_0_0.png"
+        # Write to the file before calling update_gallery so the function sees a real path.
+        image_path.write_text("data")
+
+        from gallery import update_gallery
+        original_content = gallery_path.read_text()
+        update_gallery(gallery_path, image_path, "ignored", 1, 1)
+
+        # File must remain byte-for-byte identical — no spurious replacement happened.
+        assert gallery_path.read_text() == original_content
+
     def test_generate_gallery_raises_when_no_metadata(self, temp_dir):
         """generate_gallery_for_directory must refuse to fabricate a gallery when no metadata exists."""
         from gallery import generate_gallery_for_directory
