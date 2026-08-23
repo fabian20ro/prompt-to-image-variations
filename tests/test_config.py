@@ -290,6 +290,18 @@ class TestConfig:
             settings = Settings.from_env()
             assert settings.image_generation.seed == 0
 
+    def test_negative_seed_via_enhancement_config(self):
+        """Test that negative seed via env var raises ValueError through ImageGenerationConfig.
+
+        _get_env_int silently accepts negatives/zeros, but ImageGenerationConfig.__post_init__
+        validates the value (must be >= 0). Unlike float keys (which fall back to defaults), int seed
+        values pass validation at the env layer and then fail at dataclass construction — no graceful fallback.
+        """
+        from config import Settings
+        with patch.dict(os.environ, {"PROMPT_GEN_IMAGE_SEED": "-1"}):
+            with pytest.raises(ValueError, match="seed must be non-negative"):
+                Settings.from_env()
+
     def test_nan_timeout_raises(self):
         """Test that NaN timeout values raise ValueError instead of silently passing."""
         import math

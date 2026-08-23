@@ -53,12 +53,24 @@ def unload_all_models(timeout: float = 60.0) -> None:
             return
 
         detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        logger.warning(
+            "LM Studio unload attempt %d/%d failed (rc=%s, detail=%r)",
+            attempt + 2,
+            _MAX_RETRIES,
+            result.returncode,
+            detail,
+        )
         last_exc = LMStudioUnloadError(
             f"Failed to unload LM Studio models: {detail}"
         )
         if attempt < _MAX_RETRIES - 1:
+            logger.info(
+                "LM Studio unload retrying in %.1fs",
+                _BACKOFF_SECONDS[attempt],
+            )
             time.sleep(_BACKOFF_SECONDS[attempt])
             continue
+        logger.error("LM Studio unload exhausted all %d retries", _MAX_RETRIES)
         raise last_exc
 
     raise last_exc  # type: ignore[misc]
