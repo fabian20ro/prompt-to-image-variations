@@ -254,31 +254,38 @@ class TestAppendGrammarRotation:
         assert len(history) == 1
 
     def test_empty_grammar_after_prior_state_skips_disk_write(self, run_dir):
-        """Empty/whitespace-only grammar must be a no-op — no history file created.
+        """Empty/whitespace-only grammar must be a no-op — no history file rewritten.
 
         Characterizes the early-return path in append_grammar_revision: when called
         after prior state exists and the new grammar is empty/blank, it returns the
-        existing history unchanged without creating any new files on disk. This locks
-        in the side-effect contract so future refactors cannot accidentally write
-        spurious entries to disk.
+        existing history unchanged without writing the file. The prior file is
+        pre-seeded in compact JSON (byte-for-byte different from
+        save_grammar_history's indent=2 form), so a regression that re-saves on the
+        empty-grammar path would rewrite the file to normalized form — the
+        byte-identity check below fails deterministically, with no dependence on
+        filesystem mtime granularity or wall-clock sleeps.
         """
-        # Create initial prior state
-        append_grammar_revision(run_dir, "edge_test", grammar="first_rule", action="initial")
-
+        prior_history = [
+            {
+                "id": "seeded",
+                "created_at": "2024-01-01T00:00:00",
+                "action": "initial",
+                "grammar": "first_rule",
+            },
+        ]
         edge_path = _history_path(run_dir, "edge_test")
-        assert edge_path.exists()  # history exists from prior call
-        old_mtime = edge_path.stat().st_mtime
+        # Compact separators differ byte-for-byte from indent=2 normalized output
+        edge_path.write_text(
+            json.dumps(prior_history, separators=(",", ":")), encoding="utf-8"
+        )
+        original_bytes = edge_path.read_bytes()
 
-        import time
-        time.sleep(0.02)  # ensure timestamp would change if file were rewritten
-
-        # Now pass empty grammar — should return existing history, not rewrite disk
+        # Empty grammar after prior state — must return existing history, not rewrite disk
         history = append_grammar_revision(run_dir, "edge_test", grammar="   ", action="initial")
 
-        assert len(history) == 1
-        assert history[0]["grammar"] == "first_rule"
-        # File should be unchanged (no rewrite on empty grammar path)
-        assert edge_path.stat().st_mtime <= old_mtime + 0.01
+        assert history == prior_history  # full content equality, not just length/grammar
+        # File must remain byte-identical (no rewrite on the empty-grammar path)
+        assert edge_path.read_bytes() == original_bytes
 
     def test_zero_max_revisions_disables_rotation(self, run_dir):
         for i in range(5):
