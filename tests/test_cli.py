@@ -604,6 +604,26 @@ class TestCliDryRunValidation:
         assert "Error: --prompt is required for --dry-run" in result.output
 
 
+class TestCliInputValidation:
+    """Tests for generic input validation in main()."""
+
+    def test_no_mode_flags_exits_1(self):
+        """Test that running with no prompt/mode flags exits 1 with the generic required message."""
+        runner = CliRunner()
+        result = runner.invoke(main, [])
+
+        assert result.exit_code == 1
+        assert "Error: --prompt is required" in result.output
+
+    def test_temperature_out_of_range_rejected(self):
+        """Test that --temperature outside [0.0, 2.0] is rejected with exit code 2 before any pipeline work."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat", "--temperature", "5.0"])
+
+        assert result.exit_code == 2
+        assert "temperature must be between 0.0 and 2.0" in result.output
+
+
 class TestCliServe:
     """Tests for --serve flag."""
 
