@@ -1,6 +1,7 @@
 """Tests for interactive gallery generation."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -643,3 +644,41 @@ class TestCreateGallery:
         assert "<img src" not in content
         # Escaped form should appear as text, proving html.escape was applied.
         assert "&lt;img" in content or escaped in content
+
+    def test_create_gallery_interactive_embeds_grammar_history_in_js(self, temp_dir):
+        """Interactive gallery must embed the provided grammar history in its JS."""
+        history = [
+            {"id": "initial", "created_at": "2026-01-01T00:00:00", "action": "initial", "grammar": "a"},
+            {"id": "r2", "created_at": "2026-01-02T00:00:00", "action": "update", "grammar": "b\"c</x>"},
+        ]
+
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="hist",
+            prompts=["p1"],
+            images_per_prompt=1,
+            interactive=True,
+            run_id="run-123",
+            grammar_history=history,
+        )
+
+        content = gallery.read_text()
+        match = re.search(r"const initialGrammarHistory = (\[.*?\]);", content)
+        assert match is not None, "interactive gallery must declare initialGrammarHistory"
+        embedded = json.loads(match.group(1))
+        # Entries survive JSON round-trip verbatim, including the special-character grammar.
+        assert embedded == history
+
+    def test_create_gallery_interactive_history_defaults_to_empty_list(self, temp_dir):
+        """Interactive gallery without grammar_history must embed an empty history."""
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="histempty",
+            prompts=["p1"],
+            images_per_prompt=1,
+            interactive=True,
+            run_id="run-123",
+        )
+
+        content = gallery.read_text()
+        assert "const initialGrammarHistory = [];" in content
