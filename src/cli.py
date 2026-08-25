@@ -296,6 +296,8 @@ def main(
             else:
                 _status_echo(f"Cleaned {removed} items from {paths.generated_dir}")
         if not prompt and not from_grammar and not from_prompts and not enhance_images and not serve:
+            if as_json:
+                click.echo(json.dumps({"success": True, "cleaned_count": removed}, indent=2))
             return
 
     # Handle --serve: Start web UI server
