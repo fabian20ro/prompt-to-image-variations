@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 from typing import Callable
 
 from .models import QueueState, Task, TaskStatus, TaskType, TaskProgress
@@ -21,7 +21,10 @@ class QueueManager:
             queue_path: Path to the queue.
         """
         self.queue_path = queue_path
-        self._lock = Lock()
+        # Reentrant lock: _notify() runs listeners while the lock is held, and
+        # a listener may legitimately re-enter the public API (e.g. remove
+        # itself, or call get_state) from inside its own callback.
+        self._lock = RLock()
         self._state = self._load_state()
         self._listeners: list[Callable[[str, dict], None]] = []
 
