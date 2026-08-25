@@ -560,10 +560,12 @@ class TestWorkerExecuteTask:
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await worker._execute_task(task)
 
-        # JSON failure message should take precedence over stderr join
-        worker.queue_manager.fail_task.assert_called_with(
+        # JSON failure message should take precedence over stderr join,
+        # and fail_task must be called exactly once with that message
+        worker.queue_manager.fail_task.assert_called_once_with(
             task.id, "API key expired"
         )
+        worker.queue_manager.complete_task.assert_not_called()
 
 
 class TestWorkerRun:
