@@ -707,8 +707,12 @@ def _build_card_html(run: dict, interactive: bool, is_archive: bool = False) -> 
     # Add delete button for active galleries in interactive mode
     delete_btn_html = ""
     if interactive and not is_archive:
+        # JSON-escape the gallery id so quotes/backslashes cannot break the
+        # inline JS, and neutralize "</" so the id cannot terminate the
+        # enclosing <script> block.
+        delete_id = json.dumps(run["dir_name"]).replace("</", "<\\/")
         delete_btn_html = f'''
-      <button class="btn-delete" onclick="event.preventDefault(); event.stopPropagation(); deleteGallery('{run["dir_name"]}');" title="Delete gallery">
+      <button class="btn-delete" onclick="event.preventDefault(); event.stopPropagation(); deleteGallery({delete_id});" title="Delete gallery">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="3 6 5 6 21 6"></polyline>
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
