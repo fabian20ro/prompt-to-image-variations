@@ -212,3 +212,16 @@ class TestUnloadAllModels:
              patch("lm_studio.time.sleep"):
             unload_all_models()
             assert call_count[0] == 2
+
+    def test_whitespace_only_stderr_falls_back_to_stdout(self):
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stderr = "   \n  "
+        fail_result.stdout = "whitespace stderr falls to stdout"
+
+        with patch("lm_studio.shutil.which", return_value="/usr/bin/lms"), \
+             patch("lm_studio.subprocess.run", return_value=fail_result), \
+             patch("lm_studio.time.sleep"):
+            with pytest.raises(LMStudioUnloadError) as exc_info:
+                unload_all_models()
+            assert "whitespace stderr falls to stdout" in str(exc_info.value)

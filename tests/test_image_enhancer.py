@@ -377,8 +377,15 @@ def test_enhance_image_valid_boundary_softness_forwarded(softness):
         assert call_kwargs["softness"] == softness
 
 
-@pytest.mark.parametrize("width", [0, -4, 7])
-def test_enhance_image_invalid_width(width):
+@pytest.mark.parametrize(
+    ("width", "message"),
+    [
+        (0, "Width must be positive."),
+        (-4, "Width must be positive."),
+        (7, "Width must be a multiple of 8."),
+    ],
+)
+def test_enhance_image_invalid_width(width, message):
     from image_enhancer import enhance_image
     from PIL import Image
     import tempfile
@@ -386,7 +393,7 @@ def test_enhance_image_invalid_width(width):
         img_path = Path(tmpdir) / "test.png"
         out_path = Path(tmpdir) / "out.png"
         Image.new("RGB", (10, 10)).save(img_path)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=message):
             enhance_image(img_path, out_path, width=width, height=800)
 
 

@@ -103,4 +103,7 @@ def generate_image(
         width=width,
     )
     image.save(str(output_path))
+    logger.info(
+        "Image saved to %s (%dx%d, seed %d)", output_path, width, height, seed
+    )
     return output_path
