@@ -1,5 +1,6 @@
 """Tests for html_components.py - shared HTML/CSS/JS components."""
 
+import pytest
 import re
 
 from html_components import (
@@ -68,6 +69,49 @@ class TestLogPanel:
         assert "log-panel" in html
         assert "log-content" in html
         assert "log-count" in html
+        # The clear button is in REQUIRED_HTML_IDS; removing it would break the
+        # JS clearLogs() binding and fail validate() with a specific message.
+        assert 'id="btn-clear-logs"' in html
+
+    def test_validate_passes_when_all_required_ids_present(self):
+        """LogPanel.validate() passes when the produced HTML contains every
+        element id in REQUIRED_HTML_IDS.
+
+        The contract is idempotent against the real markup: validate() rebuilds
+        the HTML via cls.html() and checks each required id in both quote
+        styles. A passing call on the current markup proves the registry and
+        the markup agree — the cheapest regression guard available without a
+        browser.
+        """
+        LogPanel.validate()
+
+    def test_validate_raises_specific_value_error_when_id_missing(self):
+        """LogPanel.validate() must fail specifically, not silently.
+
+        If a required id is removed from the markup, validate() must raise
+        ValueError naming the missing id so the JS-binding breakage is caught
+        at build time instead of surfacing as a dead Clear button in the UI.
+        Monkeypatching html() lets us break exactly one id at a time.
+        """
+        for element_id in LogPanel.REQUIRED_HTML_IDS:
+            broken = LogPanel.html().replace(f'id="{element_id}"', "id=removed")
+
+            def fake_html() -> str:
+                return broken
+
+            monkeypatch = None  # placeholder to keep the loop simple
+
+            class BrokenLogPanel(LogPanel):
+                @staticmethod
+                def html() -> str:
+                    return broken
+
+                @classmethod
+                def validate(cls) -> None:
+                    super().validate()
+
+            with pytest.raises(ValueError, match=element_id):
+                BrokenLogPanel.validate()
 
     def test_css_returns_string(self):
         css = LogPanel.css()
