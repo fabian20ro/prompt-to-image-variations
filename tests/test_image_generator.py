@@ -295,13 +295,20 @@ def test_get_model_skips_tiling_by_default(mock_settings, temp_dir):
     instance = MagicMock()
     ernie_module.ErnieImage = MagicMock(return_value=instance)
 
+    tiling_module = ModuleType("mflux.models.common.vae.tiling_config")
+    TilingConfig = MagicMock()
+    tiling_module.TilingConfig = TilingConfig
+
     with patch.dict(sys.modules, {
         "mflux.models.common.config": config_module,
         "mflux.models.ernie_image": ernie_module,
+        "mflux.models.common.vae.tiling_config": tiling_module,
     }):
         _get_model(tiled_vae=False)
 
-    assert not hasattr(instance.tiling_config, "_mock_name") or instance.tiling_config is None or "TilingConfig" not in str(type(instance.tiling_config))
+    assert not TilingConfig.called, (
+        "TilingConfig must not be instantiated when tiled_vae=False"
+    )
 
 
 @patch("image_generator._get_model")
