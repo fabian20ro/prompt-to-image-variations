@@ -62,6 +62,40 @@ class TestConfig:
             settings = Settings.from_env()
             assert str(settings.image_generation.model_path) == custom_path
 
+    def test_default_model_path_darwin_branch(self, tmp_path):
+        """Test that _default_model_path uses the macOS Library/Caches location on Darwin.
+
+        The Darwin branch of _default_model_path is never executed on non-macOS CI,
+        so patch platform.system to exercise the explicit contract.
+        """
+        from unittest.mock import patch
+        import config
+
+        with patch.object(config.platform, "system", return_value="Darwin"), \
+             patch.object(Path, "home", return_value=tmp_path):
+            result = config._default_model_path()
+
+        assert result == tmp_path / "Library/Caches/mflux/models/ernie-image-turbo-4bit"
+
+    def test_default_model_path_non_darwin_branch(self, tmp_path):
+        """Test that _default_model_path uses the .cache location on non-Darwin platforms."""
+        from unittest.mock import patch
+        import config
+
+        with patch.object(config.platform, "system", return_value="Linux"), \
+             patch.object(Path, "home", return_value=tmp_path):
+            result = config._default_model_path()
+
+        assert result == tmp_path / ".cache/mflux/models/ernie-image-turbo-4bit"
+
+    def test_default_settings_model_and_model_path(self):
+        """Test that default Settings expose the LM Studio model id and the platform model path."""
+        from config import _default_model_path
+
+        settings = Settings()
+        assert settings.lm_studio.model == "google/gemma-4-26b-a4b-qat"
+        assert settings.image_generation.model_path == _default_model_path()
+
     def test_immutable_config(self):
         """Test that config dataclasses are immutable."""
         config = LMStudioConfig()

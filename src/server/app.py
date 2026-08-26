@@ -75,6 +75,16 @@ async def lifespan(app: FastAPI):
     worker = Worker(queue_manager, paths.generated_dir)
     worker_task = asyncio.create_task(worker.run())
 
+    def _log_worker_failure(done: asyncio.Task) -> None:
+        """Report an unexpected worker crash at error level."""
+        if done.cancelled():
+            return
+        exc = done.exception()
+        if exc is not None:
+            logger.error("Worker task crashed: %s", exc, exc_info=exc)
+
+    worker_task.add_done_callback(_log_worker_failure)
+
     logger.info("Application startup complete")
 
     yield
