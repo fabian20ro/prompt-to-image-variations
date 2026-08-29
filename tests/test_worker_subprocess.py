@@ -119,15 +119,21 @@ class TestHeartbeat:
         # Thread should stop after exiting
         assert not hb._thread.is_alive()
 
-    def test_heartbeat_emits_progress(self, capsys):
-        """Test Heartbeat emits progress at intervals."""
-        with patch("server.worker_subprocess.emit_progress") as mock_emit:
-            with Heartbeat("Working...", interval=0.1):
-                import time; time.sleep(0.25)
+    def test_heartbeat_emits_progress(self):
+        """Test Heartbeat emits exactly one progress event per wait cycle."""
+        hb = Heartbeat("Working...", interval=2)
+        with patch("server.worker_subprocess.emit_progress") as mock_emit, \
+             patch.object(hb, "_stop_event") as mock_stop:
+            # wait returns False twice (cycles elapse), then True ends the loop
+            mock_stop.wait.side_effect = [False, False, True]
+            hb._heartbeat_loop()
 
-            # Should have emitted at least one heartbeat
-            heartbeats = [c for c in mock_emit.call_args_list if c.args and c.args[0] == "heartbeat"]
-            assert len(heartbeats) >= 1, f"No heartbeat progress events emitted; calls: {[c.args + tuple(c.kwargs.items()) for c in mock_emit.call_args_list]}"
+        assert mock_stop.wait.call_count == 3
+        for c in mock_stop.wait.call_args_list:
+            assert c.kwargs["timeout"] == 2
+        assert mock_emit.call_count == 2
+        for c in mock_emit.call_args_list:
+            assert c.args == ("heartbeat", 0, 0, "Working...")
 
 
 class TestCreateExecutor:
