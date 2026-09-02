@@ -7,6 +7,8 @@ from PIL import Image
 
 from utils import (
     PNG_TEXT_MAX_BYTES,
+    check_lm_studio,
+    find_metadata_file,
     load_run_metadata,
     get_prefix_from_metadata,
     count_images_in_run,
@@ -560,3 +562,74 @@ class TestUtils:
         metadata = get_flat_archive_metadata(saved_files[0])
         # The prompt was truncated but is still non-empty and starts correctly
         assert metadata.get("prompt", "").startswith("dragon ")
+
+    def test_check_lm_studio_test_environment(self):
+        """Under pytest, check_lm_studio short-circuits to True without network."""
+        assert check_lm_studio("http://localhost:1234") is True
+
+    def test_check_lm_studio_reachable(self, monkeypatch):
+        """A 200 /models response outside a test environment is accepted."""
+        import sys
+
+        import utils
+
+        monkeypatch.delitem(sys.modules, "pytest", raising=False)
+        monkeypatch.delitem(sys.modules, "unittest", raising=False)
+
+        class _Response:
+            status_code = 200
+
+        monkeypatch.setattr(utils.requests, "get", lambda url, timeout=2: _Response())
+        assert check_lm_studio("http://localhost:1234") is True
+
+    def test_check_lm_studio_non_200(self, monkeypatch):
+        """A non-200 /models response outside a test environment is rejected."""
+        import sys
+
+        import utils
+
+        monkeypatch.delitem(sys.modules, "pytest", raising=False)
+        monkeypatch.delitem(sys.modules, "unittest", raising=False)
+
+        class _Response:
+            status_code = 503
+
+        monkeypatch.setattr(utils.requests, "get", lambda url, timeout=2: _Response())
+        assert check_lm_studio("http://localhost:1234") is False
+
+    def test_check_lm_studio_unreachable(self, monkeypatch):
+        """A connection error outside a test environment is rejected."""
+        import sys
+
+        import utils
+
+        monkeypatch.delitem(sys.modules, "pytest", raising=False)
+        monkeypatch.delitem(sys.modules, "unittest", raising=False)
+
+        def _raise(url, timeout=2):
+            raise ConnectionError("connection refused")
+
+        monkeypatch.setattr(utils.requests, "get", _raise)
+        assert check_lm_studio("http://localhost:1234") is False
+
+    def test_find_metadata_file_metaprompt(self, temp_dir):
+        """New-style .metaprompt.json is found and takes priority."""
+        old_style = temp_dir / "test_metadata.json"
+        old_style.write_text("{}")
+        meta = temp_dir / "test.metaprompt.json"
+        meta.write_text("{}")
+
+        assert find_metadata_file(temp_dir) == meta
+
+    def test_find_metadata_file_old_style(self, temp_dir):
+        """Old-style _metadata.json fallback is found when no .metaprompt.json exists."""
+        meta = temp_dir / "test_metadata.json"
+        meta.write_text("{}")
+
+        assert find_metadata_file(temp_dir) == meta
+
+    def test_find_metadata_file_none(self, temp_dir):
+        """No metadata file yields None."""
+        (temp_dir / "test_0.txt").write_text("prompt")
+
+        assert find_metadata_file(temp_dir) is None
