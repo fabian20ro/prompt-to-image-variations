@@ -13,6 +13,7 @@ from grammar_generator import (
     hash_prompt,
     get_cached_grammar,
     cache_grammar,
+    get_cached_raw_response,
     CACHE_DIR,
     generate_grammar,
     ensure_lm_model_loaded,
@@ -45,6 +46,33 @@ class TestCache(unittest.TestCase):
         prompt_hash = "abcdef123456"
         result = get_cached_grammar(prompt_hash)
         assert result is None
+
+    @patch("grammar_generator.CACHE_DIR")
+    def test_get_cached_raw_response_exists(self, mock_cache_dir):
+        # The raw response is stored at "<hash>.raw.txt" (see cache_grammar),
+        # distinct from the cleaned "<hash>.tracery.json" grammar file.
+        mock_file = MagicMock(spec=Path)
+        mock_file.exists.return_value = True
+        mock_file.read_text.return_value = 'raw-lm-response'
+        mock_cache_dir.__truediv__.return_value = mock_file
+
+        prompt_hash = "abcdef123456"
+        result = get_cached_raw_response(prompt_hash)
+
+        assert result == "raw-lm-response"
+        mock_cache_dir.__truediv__.assert_called_once_with(f"{prompt_hash}.raw.txt")
+
+    @patch("grammar_generator.CACHE_DIR")
+    def test_get_cached_raw_response_not_exists(self, mock_cache_dir):
+        mock_file = MagicMock(spec=Path)
+        mock_file.exists.return_value = False
+        mock_cache_dir.__truediv__.return_value = mock_file
+
+        prompt_hash = "abcdef123456"
+        result = get_cached_raw_response(prompt_hash)
+
+        assert result is None
+        mock_file.read_text.assert_not_called()
 
     @patch("grammar_generator.CACHE_DIR")
     @patch("grammar_generator.Path.write_text")
