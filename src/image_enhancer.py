@@ -18,6 +18,17 @@ def clear_enhancer_cache():
     gc.collect()
 
 
+def enhancer_is_loaded(tiled_vae: bool = False) -> bool:
+    """Check whether the SeedVR2 model is already loaded in unified memory.
+
+    Returns True only when the enhancer cache holds an entry for the
+    given tiling key, so the server UI can tell users whether the next
+    enhancement request will start immediately or wait for a cold model
+    load.
+    """
+    return tiled_vae in _enhancer_cache
+
+
 def _get_enhancer(tiled_vae: bool = False):
     """Get or create a cached SeedVR2 enhancer instance."""
     cache_key = tiled_vae
