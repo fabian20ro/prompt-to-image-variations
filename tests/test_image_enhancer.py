@@ -10,6 +10,7 @@ from PIL import Image
 
 from image_enhancer import (
     clear_enhancer_cache,
+    enhancer_is_loaded,
     _get_enhancer,
     _enhancer_cache,
     enhance_image,
@@ -34,6 +35,48 @@ class TestEnhancerCache:
         with patch.object(gc, 'collect') as mock_gc:
             clear_enhancer_cache()
             mock_gc.assert_called_once()
+
+
+class TestEnhancerIsLoaded:
+    """Tests for the enhancer warm-state query."""
+
+    def teardown_method(self):
+        """Clear cache after each test."""
+        clear_enhancer_cache()
+
+    def test_is_loaded_fresh_cache(self):
+        """Enhancer reports unloaded on a fresh (empty) cache."""
+        clear_enhancer_cache()
+        assert enhancer_is_loaded() is False
+        assert enhancer_is_loaded(tiled_vae=True) is False
+
+    def test_is_loaded_true_after_get_enhancer(self):
+        """Enhancer reports loaded once _get_enhancer has populated the cache."""
+        assert enhancer_is_loaded() is False
+        assert enhancer_is_loaded(tiled_vae=True) is False
+
+        mock_instance = MagicMock()
+        module_seedvr2 = ModuleType("mflux.models.seedvr2.variants.upscale.seedvr2")
+        module_seedvr2.SeedVR2 = MagicMock(return_value=mock_instance)
+
+        with patch.dict(sys.modules, {
+            "mflux.models.seedvr2.variants.upscale.seedvr2": module_seedvr2,
+        }):
+            _get_enhancer(tiled_vae=True)
+
+        assert enhancer_is_loaded(tiled_vae=True) is True
+        assert enhancer_is_loaded() is False
+
+    def test_is_loaded_false_after_clear(self):
+        """Enhancer reports unloaded after clear_enhancer_cache()."""
+        _enhancer_cache[False] = MagicMock()
+        _enhancer_cache[True] = MagicMock()
+        assert enhancer_is_loaded() is True
+        assert enhancer_is_loaded(tiled_vae=True) is True
+
+        clear_enhancer_cache()
+        assert enhancer_is_loaded() is False
+        assert enhancer_is_loaded(tiled_vae=True) is False
 
 
 class TestGetEnhancer:
