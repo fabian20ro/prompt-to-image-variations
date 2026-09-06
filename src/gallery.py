@@ -186,6 +186,20 @@ def update_gallery(
         status_replacement = f'<p class="status">Generated: {completed} / {total} images</p>'
         html_content = re.sub(status_pattern, status_replacement, html_content)
 
+        # Keep the fixed progress bar in sync with the status line
+        progress_pct = round(completed / total * 100) if total else 0
+        html_content = re.sub(
+            r'(<div id="progress-fill"[^>]*style="width: )\d+(%)',
+            rf'\g<1>{progress_pct}\g<2>',
+            html_content,
+        )
+        progress_label = f"Generated: {completed} / {total} images"
+        html_content = re.sub(
+            r'(<span id="progress-text">)[^<]*(</span>)',
+            rf'\g<1>{progress_label}\g<2>',
+            html_content,
+        )
+
         gallery_path.write_text(html_content)
 
 
