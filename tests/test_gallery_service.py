@@ -60,6 +60,24 @@ class TestGalleryService:
         with pytest.raises(GalleryNotFoundError, match="Archive not found"):
             service.get_run_directory("nonexistent", is_archive=True)
 
+    def test_get_run_directory_rejects_path_traversal(self, temp_dir):
+        """Test get_run_directory rejects a run_id that escapes the base directory.
+
+        The traversal guard runs before the existence check, so an *existing*
+        directory outside prompts/ is the strongest proof the guard itself
+        (not merely the missing-dir check) is what rejects it.
+        """
+        prompts_dir = temp_dir / "prompts"
+        saved_dir = temp_dir / "saved"
+        prompts_dir.mkdir()
+        # A real directory that exists but lives OUTSIDE prompts/.
+        outside = temp_dir / "outside"
+        (outside / "20240101_120000_abc123").mkdir(parents=True)
+
+        service = GalleryService(prompts_dir, saved_dir)
+        with pytest.raises(GalleryNotFoundError, match="Gallery not found"):
+            service.get_run_directory("../outside/20240101_120000_abc123")
+
     def test_load_metadata_success(self, temp_dir):
         """Test loading metadata."""
         (temp_dir / "test.metaprompt.json").write_text(json.dumps({
