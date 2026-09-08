@@ -611,3 +611,25 @@ class TestGalleryIndexInteractive:
         }
         html = _build_card_html(run, interactive=False, is_archive=True)
         assert '<span class="archive-badge">Backup</span>' in html
+
+    def test_build_flat_archive_card_interactive_uses_saved_route(self):
+        """Flat archive card must serve the thumbnail via /saved/ in interactive mode.
+
+        Existing flat-archive card tests all pass first_image=None (the
+        'No images' fallback). The interactive branch that renders
+        <img src="/saved/<name>"> is implemented but untested — a regression
+        to the relative 'saved/<name>' form in interactive mode would slip
+        through undetected.
+        """
+        from pathlib import Path
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "model": "test-model",
+            "first_image": Path("image_20240101_120000_0_0.png"),
+        }
+        html = _build_flat_archive_card_html(archive, interactive=True)
+        assert 'src="/saved/image_20240101_120000_0_0.png"' in html
+        assert 'src="saved/' not in html
