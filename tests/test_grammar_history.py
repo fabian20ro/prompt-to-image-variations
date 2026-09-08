@@ -532,6 +532,25 @@ class TestGetRecentRevisions:
 
         assert result == [{"action": "update"}, {"action": "update"}]
 
+    def test_action_filter_with_no_matches_returns_empty_list(self):
+        """action_filter with zero matching entries must return [].
+
+        Every existing action_filter test has at least one surviving entry. The
+        docstring contract ("A non-matching value returns an empty list") is only
+        exercisable when no entry's action matches. This locks in the zero-match
+        boundary: a non-matching filter must not leak unfiltered entries or raise,
+        so future refactors of the filter comprehension keep it intact.
+        """
+        history = [
+            {"id": "r0", "action": "initial", "grammar": "g0"},
+            {"id": "r1", "action": "update", "grammar": "g1"},
+            {"id": "r2", "action": "update", "grammar": "g2"},
+        ]
+
+        result = get_recent_revisions(history, n=3, action_filter="rollback")
+
+        assert result == []
+
     def test_include_action_none_returns_full_entries(self):
         """include_action=None must return full entries (like False, not like True).
 
