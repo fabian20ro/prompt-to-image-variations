@@ -332,3 +332,10 @@ Each entry should follow this structure:
 ---
 
 <!-- New entries go above this line, most recent first -->
+
+### [2026-09-07] Complete gallery progress acceptance coverage
+
+**What happened:** Added regression cases for 3/5 = 60%, rounded 1/3 = 33%, and zero-total progress. The same tests verify progress text, status, escaped image prompt, sibling actions, and untouched cards.
+**Verification:** Container-isolated local-green passed Ruff and all 994 pytest cases. No live LM Studio or image generation required.
+**Insight:** A feature with a requested automated acceptance check remains insufficiently verified until that test exists, even when the implementation passes the previous suite.
+**Promoted to Lessons Learned:** No

@@ -197,6 +197,32 @@ class TestGalleryInteractive:
         assert '<img src="' in content
         assert '<p class="status">Generated: 0 / 1 images</p>' in content
 
+    @pytest.mark.parametrize("completed,total,percent", [(3, 5, 60), (1, 3, 33), (0, 0, 0)])
+    def test_update_gallery_updates_progress_and_preserves_cards(self, temp_dir, completed, total, percent):
+        gallery_path = temp_dir / "progress_gallery.html"
+        image_path = temp_dir / "progress_0_0.png"
+        untouched_card = '<div class="card" data-image="other.png"><div class="placeholder">Pending...</div></div>'
+        gallery_path.write_text(
+            '<div id="progress-fill" class="progress-fill" style="width: 20%"></div>'
+            '<span id="progress-text">Generated: 1 / 5 images</span>'
+            '<p class="status">Generated: 1 / 5 images</p>'
+            f'<div class="card" data-image="{image_path.name}">'
+            '<div class="placeholder">Pending...</div><button>Enhance</button></div>'
+            + untouched_card
+        )
+        image_path.write_bytes(b"image data")
+
+        update_gallery(gallery_path, image_path, "A & B", completed, total)
+
+        content = gallery_path.read_text()
+        assert f'id="progress-fill" class="progress-fill" style="width: {percent}%"' in content
+        label = f"Generated: {completed} / {total} images"
+        assert f'<span id="progress-text">{label}</span>' in content
+        assert f'<p class="status">{label}</p>' in content
+        assert f'<img src="{image_path.name}" loading="lazy" alt="A &amp; B">' in content
+        assert '<button>Enhance</button>' in content
+        assert untouched_card in content
+
     def test_update_gallery_preserves_sibling_action_buttons(self, temp_dir):
         """update_gallery should replace the placeholder while keeping sibling markup intact."""
         run_dir = temp_dir
