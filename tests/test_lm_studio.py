@@ -225,3 +225,15 @@ class TestUnloadAllModels:
             with pytest.raises(LMStudioUnloadError) as exc_info:
                 unload_all_models()
             assert "whitespace stderr falls to stdout" in str(exc_info.value)
+
+    def test_default_timeout_is_60_seconds(self):
+        """Calling unload_all_models() with no explicit timeout must pass
+        the 60-second default to subprocess.run."""
+        success_result = MagicMock()
+        success_result.returncode = 0
+
+        with patch("lm_studio.shutil.which", return_value="/usr/bin/lms"), \
+             patch("lm_studio.subprocess.run", return_value=success_result) as run_mock:
+            unload_all_models()
+            call_args, call_kwargs = run_mock.call_args
+            assert call_kwargs["timeout"] == 60.0
