@@ -488,6 +488,54 @@ class TestRunFromGrammar:
                     assert result.success is True
                     assert result.output_dir is not None
 
+    def test_run_from_grammar_propagates_raw_response_file(self, temp_dir):
+        """Raw response next to the grammar file must reach the gallery.
+
+        run_from_grammar reads {grammar_stem}.raw.txt from the grammar directory
+        and run_from_grammar_text re-emits it as {prefix}_raw_response.txt in the
+        output directory. The direct-match test only pins the negative case
+        (no raw file -> raw_response_file is None). This pins the positive path:
+        the content survives the hop intact and the gallery receives the
+        relative filename — losing either silently drops provenance from the
+        gallery without failing the run.
+        """
+        grammar_dir = temp_dir / "grammars_raw"
+        grammar_dir.mkdir()
+
+        meta = grammar_dir / "match_me.metaprompt.json"
+        meta.write_text(json.dumps({"user_prompt": "raw prompt"}))
+
+        grammar_file = grammar_dir / "match_me.tracery.json"
+        grammar_file.write_text('{"origin": ["test"]}')
+
+        raw_file = grammar_dir / "match_me.raw.txt"
+        raw_file.write_text("RAW RESPONSE CONTENT")
+
+        from pipeline import PipelineExecutor
+        executor = PipelineExecutor()
+
+        captured_kwargs = {}
+
+        def capture_gallery(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return temp_dir / "prompts" / "test_gallery.html"
+
+        with patch("pipeline.run_tracery") as mock_tracery:
+            mock_tracery.return_value = ["prompt 1"]
+            with patch("pipeline.create_gallery", side_effect=capture_gallery):
+                with patch("pipeline.generate_master_index"):
+                    result = executor.run_from_grammar(
+                        grammar_path=grammar_file, count=1, prefix="gp"
+                    )
+
+        assert result.success is True
+        # Raw response is re-emitted in the output dir under the run's prefix
+        out_raw = result.output_dir / "gp_raw_response.txt"
+        assert out_raw.exists()
+        assert out_raw.read_text() == "RAW RESPONSE CONTENT"
+        # Gallery receives the relative filename, not None or an absolute path
+        assert captured_kwargs["raw_response_file"] == "gp_raw_response.txt"
+
 
 class TestRunFullPipelineWithImages:
     """Tests for run_full_pipeline when generate_images=True."""
