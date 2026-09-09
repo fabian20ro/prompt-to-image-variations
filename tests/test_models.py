@@ -815,3 +815,29 @@ class TestSeedValidation:
     def test_seed_default_is_none(self):
         req = GenerateRequest(prompt="test")
         assert req.seed is None
+
+
+class TestGenerateRequestImagesPerPrompt:
+    """Tests for GenerateRequest images_per_prompt constraint (ge=1, le=100)."""
+
+    def test_images_per_prompt_default(self):
+        req = GenerateRequest(prompt="test")
+        assert req.images_per_prompt == 1
+
+    def test_images_per_prompt_zero_rejected(self):
+        """GenerateRequest uses ge=1 — unlike GenerateAllImagesRequest where 0 is valid."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", images_per_prompt=0)
+
+    def test_images_per_prompt_upper_bound(self):
+        from pydantic import ValidationError
+
+        # Boundary: 100 is allowed (le=100)
+        req = GenerateRequest(prompt="test", images_per_prompt=100)
+        assert req.images_per_prompt == 100
+
+        # Above upper bound
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", images_per_prompt=101)
