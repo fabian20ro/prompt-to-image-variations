@@ -497,6 +497,26 @@ class TestMetadataManager:
         assert layout["images_per_prompt"] == 3
         assert layout["max_prompts"] == 4
 
+    def test_resolve_gallery_layout_clamps_max_prompts_floor(self):
+        """A persisted max_prompts below 1 is clamped up to the minimum of 1.
+
+        The normalization tail of resolve_gallery_layout runs
+        ``max_prompts = max(1, int(max_prompts))`` for any non-None value, so
+        an older run that persisted ``max_prompts: 0`` must not resolve to 0
+        (which would make the gallery empty) — it clamps to 1.
+        """
+        metadata = {
+            "gallery_layout": {
+                "images_per_prompt": 2,
+                "max_prompts": 0,
+            },
+        }
+
+        layout = resolve_gallery_layout(metadata)
+
+        assert layout["images_per_prompt"] == 2
+        assert layout["max_prompts"] == 1
+
 
 class TestConvenienceFunctions:
     """Tests for convenience functions."""
