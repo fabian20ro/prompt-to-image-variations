@@ -230,6 +230,36 @@ class TestNotifications:
         html = Notifications.html()
         assert "toast-region" in html
 
+    def test_confirm_modal_dom_preconditions_present(self):
+        """Notifications.html() must define every DOM node confirmAction() depends on.
+
+        confirmAction() guards with `if (!modal || !msg || !ok || !cancel) return
+        Promise.resolve(false)`, so the confirm-modal, confirm-message, confirm-ok,
+        and confirm-cancel ids are hard preconditions for the dialog to work.
+        Removing any one of them would make every confirmAction() call silently
+        resolve to false — destructive actions would lose their confirmation
+        prompt — while the JS still looks intact. The existing markup test only
+        asserts toast-region, so this is the missing observable contract: all
+        four guard-referenced ids must exist in the produced HTML.
+        """
+        html = Notifications.html()
+        assert 'id="confirm-modal"' in html, (
+            "confirmAction() requires the confirm-modal node; without it every "
+            "confirmation dialog silently resolves to false."
+        )
+        assert 'id="confirm-message"' in html, (
+            "confirmAction() requires the confirm-message node to render the "
+            "prompt text."
+        )
+        assert 'id="confirm-ok"' in html, (
+            "confirmAction() requires the confirm-ok node; users could never "
+            "approve a confirmation."
+        )
+        assert 'id="confirm-cancel"' in html, (
+            "confirmAction() requires the confirm-cancel node; users could never "
+            "decline a confirmation."
+        )
+
     def test_css_returns_string(self):
         css = Notifications.css()
         assert ".toast" in css
