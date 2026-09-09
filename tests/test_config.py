@@ -353,6 +353,7 @@ class TestConfig:
     def test_path_properties(self):
         """Verify path properties are Path objects and correct."""
         assert isinstance(paths.root_dir, Path)
+        assert isinstance(paths.src_dir, Path)
         assert isinstance(paths.generated_dir, Path)
         assert isinstance(paths.grammars_dir, Path)
         assert isinstance(paths.prompts_dir, Path)
@@ -361,6 +362,7 @@ class TestConfig:
         assert isinstance(paths.templates_dir, Path)
 
         # Verify path relationships
+        assert paths.src_dir == paths.root_dir / "src"
         assert paths.generated_dir == paths.root_dir / "generated"
         assert paths.grammars_dir == paths.generated_dir / "grammars"
         assert paths.prompts_dir == paths.generated_dir / "prompts"
