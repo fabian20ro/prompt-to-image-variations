@@ -119,6 +119,19 @@ class TestCliCleanCommand:
             assert "Cleaned" not in result.output
             assert "Nothing to clean." not in result.output
 
+    def test_clean_json_outputs_machine_readable_summary(self):
+        """Test --clean --json emits a machine-readable JSON summary with cleaned_count."""
+        runner = CliRunner()
+        with patch("cli.clean_generated", return_value=3) as mock_clean:
+            result = runner.invoke(main, ["--clean", "--json"])
+            assert result.exit_code == 0
+            json_start = result.output.find("{")
+            assert json_start >= 0
+            parsed = json.loads(result.output[json_start:])
+            assert parsed["success"] is True
+            assert parsed["cleaned_count"] == 3
+            mock_clean.assert_called_once()
+
 
 class TestCliValidation:
     """Tests for CLI argument validation."""
