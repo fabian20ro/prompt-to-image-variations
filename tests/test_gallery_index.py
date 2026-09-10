@@ -632,4 +632,62 @@ class TestGalleryIndexInteractive:
         }
         html = _build_flat_archive_card_html(archive, interactive=True)
         assert 'src="/saved/image_20240101_120000_0_0.png"' in html
+
+
+class TestGrammarRevisionCount:
+    """Tests for grammar revision count on master index entries."""
+
+    def test_index_shows_grammar_revision_count(self, temp_dir):
+        """Run with a 3-entry grammar history shows '3 grammar revisions'."""
+        run_dir = temp_dir / "prompts" / "20240101_120000_abc123"
+        run_dir.mkdir(parents=True)
+        (run_dir / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "prompt",
+        }))
+        (run_dir / "test_gallery.html").write_text("<html></html>")
+        history = [{"id": "1", "action": "initial", "grammar": "v1"},
+                   {"id": "2", "action": "update", "grammar": "v2"},
+                   {"id": "3", "action": "update", "grammar": "v3"}]
+        (run_dir / "test_grammar_history.json").write_text(json.dumps(history))
+
+        index_path = generate_master_index(temp_dir)
+        content = index_path.read_text()
+
+        assert "3 grammar revisions" in content
+
+    def test_index_defaults_to_single_grammar_revision(self, temp_dir):
+        """Run without a grammar history file shows '1 grammar revision'."""
+        run_dir = temp_dir / "prompts" / "20240101_120000_abc123"
+        run_dir.mkdir(parents=True)
+        (run_dir / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "prompt",
+        }))
+        (run_dir / "test_gallery.html").write_text("<html></html>")
+
+        index_path = generate_master_index(temp_dir)
+        content = index_path.read_text()
+
+        assert "1 grammar revision" in content
+
+    def test_build_card_grammar_revision_fallback(self):
+        """Card without grammar_revisions key falls back to singular '1 grammar revision'."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": "prompts/20240101_120000_xxx/image.png",
+        }
+        html = _build_card_html(run, interactive=False)
+
+        assert "1 grammar revision" in html
         assert 'src="saved/' not in html

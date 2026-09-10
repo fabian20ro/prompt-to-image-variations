@@ -137,6 +137,17 @@ def _extract_run_info(run_dir: Path, is_archive: bool = False) -> dict | None:
     # Get prompt count
     prompt_count = metadata.get("count", 0)
 
+    # Count grammar revisions (1 when no history file was written)
+    grammar_revisions = 1
+    history_path = run_dir / f"{prefix}_grammar_history.json"
+    if history_path.exists():
+        try:
+            history_data = json.loads(history_path.read_text())
+            if isinstance(history_data, list):
+                grammar_revisions = len(history_data)
+        except (json.JSONDecodeError, IOError):
+            pass
+
     # Build paths based on whether this is an archive
     if is_archive:
         gallery_path = f"saved/{run_dir.name}/{prefix}_gallery.html"
@@ -158,6 +169,7 @@ def _extract_run_info(run_dir: Path, is_archive: bool = False) -> dict | None:
         "thumbnail_file": thumbnail_file,
         "image_count": image_count,
         "prompt_count": prompt_count,
+        "grammar_revisions": grammar_revisions,
         "model": metadata.get("model") or metadata.get("image_generation", {}).get("model") or "N/A",
         "is_archive": is_archive,
         "backup_reason": backup_reason,
@@ -728,6 +740,7 @@ def _build_card_html(run: dict, interactive: bool, is_archive: bool = False) -> 
         <div class="meta">
           <span class="time">{run["display_time"]}</span>
           <span class="stats">{run["image_count"]} {'image' if run['image_count'] == 1 else 'images'} | {run["prompt_count"]} {'prompt' if run['prompt_count'] == 1 else 'prompts'}</span>
+          <span class="grammar-revisions">{run.get("grammar_revisions", 1)} {'grammar revision' if run.get("grammar_revisions", 1) == 1 else 'grammar revisions'}</span>
           <span class="model">{run["model"]}</span>
         </div>
       </div>
