@@ -228,6 +228,17 @@ def test_generate_image_rejects_invalid_dimensions(
         generate_image("test", temp_dir / "image.png", width=width, height=height)
 
 
+@patch("image_generator._get_model")
+@patch("image_generator.unload_all_models")
+def test_generate_image_rejects_negative_seed(mock_unload, mock_get_model, temp_dir):
+    """A negative seed must raise ValueError before any model work is attempted."""
+    with pytest.raises(ValueError, match=r"Seed must be non-negative, got -5"):
+        generate_image("test", temp_dir / "image.png", seed=-5, width=512, height=512)
+
+    mock_unload.assert_not_called()
+    mock_get_model.assert_not_called()
+
+
 @pytest.mark.parametrize("width,height", [(64, 64), (256, 256), (864, 1152)])
 @patch("image_generator._get_model")
 @patch("image_generator.unload_all_models")
