@@ -553,6 +553,56 @@ class TestReadPromptFromStdin:
             seeds = [call.kwargs.get("seed") for call in mock_enhance.call_args_list]
             assert seeds == [42, 43, 44]
 
+    def test_enhance_images_import_error_exits_1(self, tmp_path):
+        """Test --enhance-images exits 1 with the ImportError message (not the generic error)."""
+        fake_img = tmp_path / "test.png"
+        fake_img.touch()
+
+        class MockProgressBar:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def __iter__(self):
+                yield fake_img
+            def write(self, s): pass
+
+        with patch("cli.collect_images", return_value=[fake_img]), \
+             patch("cli.enhance_image", side_effect=ImportError("mflux is not installed")), \
+             patch("click.progressbar", MockProgressBar):
+            runner = CliRunner()
+            result = runner.invoke(main, ["--enhance-images", "/some/path"])
+
+            assert result.exit_code == 1
+            assert "Error: mflux is not installed" in result.output
+            # The ImportError branch must not use the generic "Error enhancing image:" prefix
+            assert "Error enhancing image:" not in result.output
+            # Failure must abort before the success summary
+            assert "Enhanced 1 images" not in result.output
+
+    def test_enhance_images_generic_error_exits_1(self, tmp_path):
+        """Test --enhance-images exits 1 with 'Error enhancing image:' for non-ImportError failures."""
+        fake_img = tmp_path / "test.png"
+        fake_img.touch()
+
+        class MockProgressBar:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def __iter__(self):
+                yield fake_img
+            def write(self, s): pass
+
+        with patch("cli.collect_images", return_value=[fake_img]), \
+             patch("cli.enhance_image", side_effect=RuntimeError("out of memory")), \
+             patch("click.progressbar", MockProgressBar):
+            runner = CliRunner()
+            result = runner.invoke(main, ["--enhance-images", "/some/path"])
+
+            assert result.exit_code == 1
+            assert "Error enhancing image: out of memory" in result.output
+            # Failure must abort before the success summary
+            assert "Enhanced 1 images" not in result.output
+
 
 class TestStdinPrompt:
     """Tests for --prompt - (read prompt from stdin)."""
