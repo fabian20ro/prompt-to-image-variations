@@ -1,6 +1,7 @@
 """Tests for src/grammar_history — persisted grammar revision history helpers."""
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
