@@ -657,6 +657,16 @@ class TestGrammarStructureValidation(unittest.TestCase):
                 "subject": ["fox", "", "hare", "badger", "deer"],
             })
 
+    def test_rejects_whitespace_only_option_strings(self):
+        # An option that is whitespace-only (e.g. "   ") passes isinstance(option, str)
+        # but fails option.strip() — the validator must reject it so LLM output with
+        # padded alternatives cannot reach rendering as a blank choice.
+        with self.assertRaisesRegex(ValueError, "must contain non-empty strings"):
+            validate_grammar_structure({
+                "origin": ["#subject#"],
+                "subject": ["fox", "   ", "hare", "badger", "deer"],
+            })
+
     def test_rejects_multiple_missing_references(self):
         # When LM Studio references multiple undefined rules, the validator must
         # report all of them so callers see a complete error instead of one at a
