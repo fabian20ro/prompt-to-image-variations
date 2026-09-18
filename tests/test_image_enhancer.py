@@ -474,6 +474,30 @@ def test_enhance_image_rejects_excessive_dimensions(kwargs, message):
             enhance_image(img_path, out_path, **kwargs)
 
 
+def test_enhance_image_max_dimension_boundary_accepted():
+    """The exact MAX_DIMENSION (16384) is valid and forwarded, not rejected."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+    from PIL import Image
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_enhancer.generate_image.return_value = MagicMock()
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path, width=16384, height=16384)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["width"] == 16384
+        assert call_kwargs["height"] == 16384
+
+
 @pytest.mark.parametrize("width,height", [(0, -4), (-5, 7), (9, 3)])
 def test_enhance_image_both_invalid_dimensions(width, height):
     """Test that simultaneous invalid width and height raise ValueError."""
