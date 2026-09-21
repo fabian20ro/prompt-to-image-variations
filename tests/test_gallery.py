@@ -708,3 +708,26 @@ class TestCreateGallery:
 
         content = gallery.read_text()
         assert "const initialGrammarHistory = [];" in content
+
+    def test_create_gallery_interactive_emits_base_tag_scoped_to_run(self, temp_dir):
+        """An interactive gallery with a run_id must emit a <base> tag scoped to that run's URL; without a run_id, none."""
+        from gallery import create_gallery
+
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="basetag",
+            prompts=["p1"],
+            images_per_prompt=1,
+            interactive=True,
+            run_id="run-42",
+        )
+        assert '<base href="/gallery/run-42/">' in gallery.read_text()
+
+        no_run = create_gallery(
+            output_dir=temp_dir,
+            prefix="basetag2",
+            prompts=["p1"],
+            images_per_prompt=1,
+            interactive=True,
+        )
+        assert "base href" not in no_run.read_text()
