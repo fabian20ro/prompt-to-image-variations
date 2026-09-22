@@ -114,6 +114,50 @@ class TestGalleryInteractive:
         assert "alert(" not in content
         assert "confirm(" not in content
 
+    def test_gallery_interactive_copy_prompt(self, temp_dir):
+        """The Copy button and copyPrompt JS function are gated on interactive=True.
+
+        Verifies all three acceptance criteria at once: the card-level Copy
+        button (_build_card_html), the embedded copyPrompt clipboard function
+        (create_gallery), and its presence/absence in the generated directory
+        gallery (generate_gallery_for_directory).
+        """
+        from gallery import _build_card_html
+
+        run_dir = temp_dir
+        metadata = {
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "test prompt",
+            "image_generation": {"images_per_prompt": 1},
+        }
+        create_run_files(run_dir, num_prompts=1, metadata=metadata)
+
+        # 1. Card level: interactive renders a Copy button, non-interactive does not.
+        interactive_card = _build_card_html("x.png", "a prompt", 0, 0, exists=True, interactive=True)
+        assert '<button class="btn-small btn-secondary" onclick="copyPrompt(this)">Copy</button>' in interactive_card
+        assert '>Generate<' in interactive_card and '>Enhance<' in interactive_card
+        plain_card = _build_card_html("x.png", "a prompt", 0, 0, exists=True)
+        assert '>Copy<' not in plain_card
+
+        # 2. create_gallery with interactive=True embeds the copyPrompt JS function.
+        gallery = create_gallery(
+            output_dir=temp_dir, prefix="cp", prompts=["p1"],
+            images_per_prompt=1, interactive=True, run_id="run-cp",
+        )
+        content = gallery.read_text()
+        assert "window.copyPrompt" in content
+        assert "navigator.clipboard.writeText" in content
+        assert "showToast" in content
+
+        # 3. generate_gallery_for_directory: present when interactive, absent otherwise.
+        interactive_path = generate_gallery_for_directory(run_dir, interactive=True)
+        assert "copyPrompt" in interactive_path.read_text()
+        assert '>Copy<' in interactive_path.read_text()
+        non_interactive_path = generate_gallery_for_directory(run_dir, interactive=False)
+        assert "copyPrompt" not in non_interactive_path.read_text()
+        assert '>Copy<' not in non_interactive_path.read_text()
+
     def test_gallery_uses_persisted_layout_and_settings(self, temp_dir):
         """Gallery form defaults should come from persisted metadata, not hardcoded literals."""
         run_dir = temp_dir
