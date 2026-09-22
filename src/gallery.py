@@ -116,6 +116,7 @@ def _build_card_html(
       <div class="card-actions">
         <button class="btn-small btn-primary" onclick="generateImage(this, {prompt_idx}, {image_idx})">Generate</button>
         <button class="btn-small btn-secondary" onclick="enhanceImage(this, {prompt_idx}, {image_idx})">Enhance</button>
+        <button class="btn-small btn-secondary" onclick="copyPrompt(this)">Copy</button>
       </div>'''
 
     if exists:
@@ -816,6 +817,19 @@ def _build_interactive_js(run_id: str, grammar_history: list[dict]) -> str:
     progressBar.classList.remove('hidden');
     progressMessage.textContent = `Enhancing image ${{promptIdx}}_${{imageIdx}}...`;
     showToast(`Queued enhancement for ${{promptIdx}}_${{imageIdx}}`, 'success');
+  }};
+
+  window.copyPrompt = function(btn) {{
+    const card = btn.closest('.card');
+    if (!card) return;
+    const promptEl = card.querySelector('.prompt');
+    const text = promptEl ? promptEl.textContent : '';
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {{
+      showToast('Prompt copied to clipboard', 'success');
+    }}).catch(() => {{
+      showToast('Failed to copy prompt', 'error');
+    }});
   }};
 
   if (grammarEditor) {{
