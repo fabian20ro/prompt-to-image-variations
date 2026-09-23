@@ -78,6 +78,25 @@ class TestGalleryService:
         with pytest.raises(GalleryNotFoundError, match="Gallery not found"):
             service.get_run_directory("../outside/20240101_120000_abc123")
 
+    def test_get_run_directory_archive_rejects_path_traversal(self, temp_dir):
+        """Test get_run_directory in archive mode rejects a run_id that escapes saved/.
+
+        Mirrors the gallery-mode traversal test: an *existing* directory
+        outside saved/ proves the traversal guard (not the existence check)
+        is what rejects the request in archive mode.
+        """
+        prompts_dir = temp_dir / "prompts"
+        saved_dir = temp_dir / "saved"
+        prompts_dir.mkdir()
+        saved_dir.mkdir()
+        # A real directory that exists but lives OUTSIDE saved/.
+        outside = temp_dir / "archive_outside"
+        (outside / "archive_20240101").mkdir(parents=True)
+
+        service = GalleryService(prompts_dir, saved_dir)
+        with pytest.raises(GalleryNotFoundError, match="Archive not found"):
+            service.get_run_directory("../archive_outside/archive_20240101", is_archive=True)
+
     def test_load_metadata_success(self, temp_dir):
         """Test loading metadata."""
         (temp_dir / "test.metaprompt.json").write_text(json.dumps({
