@@ -2,6 +2,7 @@
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,33 @@ from gallery import create_gallery, generate_gallery_for_directory, update_galle
 
 class TestGalleryInteractive:
     """Tests for interactive gallery generation."""
+
+    def test_shipping_copy_handler_handles_clipboard_capabilities(self, temp_dir):
+        gallery = create_gallery(output_dir=temp_dir, prefix="cp", prompts=["p1"],
+                                 images_per_prompt=1, interactive=True, run_id="run-cp")
+        # Execute the emitted handler, not a Python reimplementation or a string assertion.
+        content = gallery.read_text()
+        handler = content[content.index('window.copyPrompt ='):content.index('  if (grammarEditor)', content.index('window.copyPrompt ='))]
+        script = r'''
+const vm = require('node:vm'), assert = require('node:assert/strict');
+(async () => {
+  for (const mode of ['success', 'absent', 'rejected', 'throws']) {
+    const calls = [], toasts = [];
+    const navigator = mode === 'absent' ? {} : {clipboard: {writeText(text) {
+      calls.push(text);
+      if (mode === 'throws') throw Error('denied');
+      return mode === 'rejected' ? Promise.reject(Error('denied')) : Promise.resolve();
+    }}};
+    const context = {window: {}, navigator, showToast: (...args) => toasts.push(args)};
+    vm.runInNewContext(HANDLER, context);
+    await context.window.copyPrompt({closest: () => ({querySelector: () => ({textContent: 'exact 🌈\nprompt'})})});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, mode === 'absent' ? [] : ['exact 🌈\nprompt']);
+    assert.deepEqual(toasts, [[mode === 'success' ? 'Prompt copied to clipboard' : 'Failed to copy prompt', mode === 'success' ? 'success' : 'error']]);
+  }
+})().catch(error => {console.error(error); process.exit(1)});
+'''.replace('HANDLER', json.dumps(handler))
+        subprocess.run(['node', '-e', script], check=True, capture_output=True, text=True)
 
     def test_gallery_interactive_mode(self, temp_dir, sample_grammar):
         """Test that interactive gallery includes editor and buttons."""
