@@ -819,17 +819,21 @@ def _build_interactive_js(run_id: str, grammar_history: list[dict]) -> str:
     showToast(`Queued enhancement for ${{promptIdx}}_${{imageIdx}}`, 'success');
   }};
 
-  window.copyPrompt = function(btn) {{
+  window.copyPrompt = async function(btn) {{
     const card = btn.closest('.card');
     if (!card) return;
     const promptEl = card.querySelector('.prompt');
     const text = promptEl ? promptEl.textContent : '';
     if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {{
+    try {{
+      if (typeof navigator.clipboard?.writeText !== 'function') {{
+        throw new Error('Clipboard unavailable');
+      }}
+      await navigator.clipboard.writeText(text);
       showToast('Prompt copied to clipboard', 'success');
-    }}).catch(() => {{
+    }} catch {{
       showToast('Failed to copy prompt', 'error');
-    }});
+    }}
   }};
 
   if (grammarEditor) {{
