@@ -29,6 +29,7 @@ class TestConfig:
         """Test that settings can be loaded from environment variables."""
         env_vars = {
             "PROMPT_GEN_LM_STUDIO_URL": "http://test:5000/v1",
+            "PROMPT_GEN_LM_STUDIO_MODEL": "test-model",
             "PROMPT_GEN_DEFAULT_WIDTH": "1024",
             "PROMPT_GEN_DEFAULT_HEIGHT": "768",
             "PROMPT_GEN_SSE_QUEUE_SIZE": "200",
@@ -38,6 +39,7 @@ class TestConfig:
         with patch.dict(os.environ, env_vars):
             settings = Settings.from_env()
             assert settings.lm_studio.base_url == "http://test:5000/v1"
+            assert settings.lm_studio.model == "test-model"
             assert settings.image_generation.default_width == 1024
             assert settings.image_generation.default_height == 768
             assert settings.server.sse_queue_size == 200
