@@ -339,3 +339,12 @@ Each entry should follow this structure:
 **Verification:** Container-isolated local-green passed Ruff and all 994 pytest cases. No live LM Studio or image generation required.
 **Insight:** A feature with a requested automated acceptance check remains insufficiently verified until that test exists, even when the implementation passes the previous suite.
 **Promoted to Lessons Learned:** No
+
+### [2026-09-25] Upgrade locked AnyIO security dependency
+
+**Context:** Critical dependency alert32, TLS hostname validation; installed lock had4.13.0.
+**What happened:** Upgrade only AnyIO to4.14.2. HTTPX dev dependency reaches AnyIO;
+production HTTP calls inspected use requests, so application exploitability is not established.
+No broad dependency refresh or behavioral changes. Discarded unrelated uv resolver formatting.
+**Verification:** Linux Ruff and1017 pytest cases passed; final minimal lock rechecked separately.
+**Promoted to Lessons Learned:** No
