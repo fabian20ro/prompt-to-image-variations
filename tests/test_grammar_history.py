@@ -552,6 +552,32 @@ class TestGetRecentRevisions:
 
         assert result == []
 
+    def test_action_filter_applies_to_recent_window_not_full_history(self):
+        """action_filter must narrow the sliced recent window, not the full history.
+
+        The production order is slice-then-filter: the most recent ``n`` entries
+        are taken first, then the filter drops non-matching entries from that
+        window — so the result may hold fewer than ``n`` entries (docstring:
+        "at most ``n`` recent revisions").
+
+        Every existing action_filter test keeps its matching entries inside the
+        recent window (or covers the whole history), so an implementation that
+        filtered the full history before slicing would pass them all. Here an
+        older matching entry (r0) sits outside the n=3 window behind two
+        non-matching entries: a filter-before-slice regression would
+        incorrectly resurrect it.
+        """
+        history = [
+            {"id": "r0", "action": "update", "grammar": "g0"},
+            {"id": "r1", "action": "rollback", "grammar": "g1"},
+            {"id": "r2", "action": "rollback", "grammar": "g2"},
+            {"id": "r3", "action": "update", "grammar": "g3"},
+        ]
+
+        result = get_recent_revisions(history, n=3, action_filter="update")
+
+        assert [entry["id"] for entry in result] == ["r3"]
+
     def test_include_action_none_returns_full_entries(self):
         """include_action=None must return full entries (like False, not like True).
 
