@@ -739,6 +739,9 @@ class TestCliFullPipeline:
 
         assert result.exit_code == 0
         mock_executor.run_full_pipeline.assert_called_once()
+        assert "Generated 5 prompts in: /tmp/test" in result.output
+        # image_count == 0 (prompt-only run) must not print an image summary line
+        assert "Generated 0 images" not in result.output
 
     @patch("cli.PipelineExecutor")
     def test_prompt_with_dimensions(self, mock_executor_cls):

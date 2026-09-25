@@ -269,6 +269,42 @@ const vm = require('node:vm'), assert = require('node:assert/strict');
         assert '<img src="' in content
         assert '<p class="status">Generated: 0 / 1 images</p>' in content
 
+    def test_update_gallery_clears_busy_state_from_completed_card(self, temp_dir):
+        """A completed card must lose role="status" and aria-busy; pending siblings keep both."""
+        run_dir = temp_dir
+        prefix = "busy"
+        gallery_path = run_dir / f"{prefix}_gallery.html"
+        image_path = run_dir / f"{prefix}_0_0.png"
+
+        gallery_path.write_text(
+            f'<div class="card" data-image="{prefix}_0_0.png" data-prompt-idx="0" data-image-idx="0" role="status" aria-label="Generating: a &amp; b" aria-busy="true">\n'
+            '  <div class="placeholder">Pending...</div>\n'
+            '</div>\n'
+            f'<div class="card" data-image="{prefix}_1_0.png" data-prompt-idx="1" data-image-idx="0" role="status" aria-label="Generating: c" aria-busy="true">\n'
+            '  <div class="placeholder">Pending...</div>\n'
+            '</div>\n'
+            '<p class="status">Generated: 0 / 2 images</p>'
+        )
+
+        image_path.write_text("image data")
+
+        update_gallery(gallery_path, image_path, "a & b", 1, 2)
+
+        content = gallery_path.read_text()
+        completed = content[
+            content.index(f'data-image="{prefix}_0_0.png"') : content.index(f'data-image="{prefix}_1_0.png"')
+        ]
+        assert 'aria-busy=' not in completed
+        assert 'role="status"' not in completed
+        assert f'data-image="{prefix}_0_0.png"' in completed
+        assert 'data-prompt-idx="0"' in completed
+        assert 'data-image-idx="0"' in completed
+        assert f'<img src="{prefix}_0_0.png" loading="lazy" alt="a &amp; b">' in completed
+
+        pending = content[content.index(f'data-image="{prefix}_1_0.png"'):]
+        assert 'role="status"' in pending
+        assert 'aria-busy="true"' in pending
+
     @pytest.mark.parametrize("completed,total,percent", [(3, 5, 60), (1, 3, 33), (0, 0, 0)])
     def test_update_gallery_updates_progress_and_preserves_cards(self, temp_dir, completed, total, percent):
         gallery_path = temp_dir / "progress_gallery.html"
