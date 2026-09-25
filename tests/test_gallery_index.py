@@ -418,6 +418,7 @@ class TestGalleryIndexInteractive:
         result = _extract_run_info(active_run, is_archive=False)
         assert result is not None
         assert result["user_prompt"] == "Unknown prompt"
+        assert result["model"] == "N/A"
 
     def test_build_index_html_empty_flat_archives_section(self):
         """_build_index_html should not render flat-archive section when there are none."""
