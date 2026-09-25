@@ -174,13 +174,20 @@ def update_gallery(
         )
 
         escaped_prompt = html.escape(prompt) if prompt else ""
-        replacement = (
-            rf'\1\n      <a href="{image_filename}" target="_blank">\n'
-            rf'        <img src="{image_filename}" loading="lazy" alt="{escaped_prompt}">\n'
-            rf'      </a>'
-        )
 
-        html_content = re.sub(placeholder_pattern, replacement, html_content)
+        def _replace_placeholder(match: re.Match[str]) -> str:
+            # Clear the live-region/busy state on the completed card; still-pending
+            # cards keep their attributes so assistive technology keeps announcing
+            # updates there.
+            opening = re.sub(r'\s*role="status"', "", match.group(1))
+            opening = re.sub(r'\s*aria-busy="true"', "", opening)
+            return (
+                f'{opening}\n      <a href="{image_filename}" target="_blank">\n'
+                f'        <img src="{image_filename}" loading="lazy" alt="{escaped_prompt}">\n'
+                f'      </a>'
+            )
+
+        html_content = re.sub(placeholder_pattern, _replace_placeholder, html_content)
 
         # Update the status count
         status_pattern = r'<p class="status">Generated: \d+ / \d+ images</p>'
