@@ -532,6 +532,50 @@ class TestQueueEndpoints:
         assert data["completed_count"] == 1
 
 
+class TestEventsEndpoint:
+    """Tests for /api/events SSE endpoint."""
+
+    def test_initial_status_event_includes_completed_count_and_queue_length(self, client, mock_queue_manager):
+        """The first SSE status event mirrors the /api/status fields."""
+        mock_queue_manager.get_state.return_value = QueueState(
+            pending=[
+                Task(id="1", type=TaskType.GENERATE_PIPELINE),
+                Task(id="2", type=TaskType.GENERATE_PIPELINE),
+            ],
+            current_task=Task(id="3", type=TaskType.GENERATE_PIPELINE),
+            completed=[
+                Task(id="4", type=TaskType.GENERATE_PIPELINE),
+                Task(id="5", type=TaskType.GENERATE_PIPELINE),
+                Task(id="6", type=TaskType.GENERATE_PIPELINE),
+            ],
+        )
+
+        import server.routes as routes_module
+
+        shutdown = MagicMock()
+        shutdown.is_set.return_value = True
+        with patch.object(routes_module, "get_shutdown_event", return_value=shutdown):
+            with client.stream("GET", "/api/events") as response:
+                assert response.status_code == 200
+                assert "text/event-stream" in response.headers["content-type"]
+
+                event = None
+                data = None
+                for line in response.iter_lines():
+                    if line.startswith("event: "):
+                        event = line[len("event: "):]
+                    elif line.startswith("data: "):
+                        data = line[len("data: "):]
+                        if event == "status":
+                            break
+
+        assert data is not None
+        payload = json.loads(data)
+        assert payload["completed_count"] == 3
+        assert payload["queue_length"] == 3
+        assert payload["pending_count"] == 2
+
+
 class TestKillWorkerEndpoint:
     """Tests for /api/worker/kill endpoint."""
 

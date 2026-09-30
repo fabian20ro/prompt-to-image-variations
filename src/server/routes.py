@@ -124,6 +124,8 @@ async def sse_events(request: Request):
                 "event": "status",
                 "data": json.dumps({
                     "pending_count": len(state.pending),
+                    "completed_count": len(state.completed),
+                    "queue_length": len(state.pending) + (1 if state.current_task else 0),
                     "current": state.current_task.model_dump(mode='json') if state.current_task else None,
                 }),
             }
