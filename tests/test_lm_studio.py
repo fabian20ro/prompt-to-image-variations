@@ -174,6 +174,7 @@ class TestUnloadAllModels:
             assert call_args == (["/usr/bin/lms", "unload", "--all"],)
             assert call_kwargs["capture_output"] is True
             assert call_kwargs["text"] is True
+            assert call_kwargs["check"] is False
 
     def test_non_timeout_subprocess_exception_propagates_without_retry(self):
         raise_exc = OSError("device busy")
