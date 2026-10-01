@@ -162,7 +162,8 @@ async def test_heartbeat_thread_stops_when_emit_raises():
         if call_count >= 2:
             raise RuntimeError("emit_progress failure")
 
-    with patch('src.server.worker_subprocess.emit_progress', side_effect=failing_emit):
+    with patch('src.server.worker_subprocess.emit_progress', side_effect=failing_emit), \
+         patch('src.server.worker_subprocess.log_to_file') as mock_log:
         with Heartbeat(message="test", interval=0.05) as hb:
             await asyncio.sleep(0.3)
 
@@ -171,6 +172,14 @@ async def test_heartbeat_thread_stops_when_emit_raises():
         assert hb._thread is not None and not hb._thread.is_alive()
         # Thread should still exist (join happened) but no more heartbeats emitted
         assert call_count > 0, "At least one heartbeat was emitted before the error"
+        # The exception handler must log the emission failure; without this
+        # assertion, removing the except block would be invisible because the
+        # thread dies from the uncaught exception and __exit__ sets the event.
+        assert mock_log.call_count >= 1, \
+            "log_to_file must be called when emit_progress raises inside the thread"
+        logged_message = mock_log.call_args_list[0][0][0]
+        assert "Heartbeat stopped after progress emission failed" in logged_message, \
+            "Failure log must identify the heartbeat emission failure"
 
 
 if __name__ == "__main__":
