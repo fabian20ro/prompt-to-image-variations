@@ -439,6 +439,24 @@ class TestSSEClient:
             "neutralized without side effects."
         )
 
+    def test_js_resets_retry_count_on_open(self):
+        """A successful SSE open must reset the retry counter to zero.
+
+        connectSSE() gives up permanently once sseRetryCount reaches MAX_SSE_RETRIES.
+        Without resetting sseRetryCount = 0 in onopen, the counter keeps accumulating
+        across reconnects: a flaky-but-healthy stream that reconnects a few times
+        would erode its retry headroom and eventually give up even though every
+        connection was successful. Resetting on open is what preserves a full retry
+        budget for genuine future outages. The reset is observable as the
+        'sseRetryCount = 0' assignment inside the onopen handler.
+        """
+        js = SSEClient.js()
+        assert "sseRetryCount = 0" in js, (
+            "onopen must reset sseRetryCount to zero; otherwise a healthy "
+            "connection's retry budget is eroded across reconnects and the "
+            "client gives up prematurely on a later genuine outage."
+        )
+
 
 class TestNavHeader:
     """Tests for NavHeader component."""
