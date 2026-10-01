@@ -230,6 +230,18 @@ def test_generate_image_rejects_invalid_dimensions(
 
 @patch("image_generator._get_model")
 @patch("image_generator.unload_all_models")
+def test_generate_image_rejects_zero_width(mock_unload, mock_get_model, temp_dir):
+    """width=0 is a multiple of 8 but not positive; the positive check must
+    reject it (not the multiple-of-8 check) before any model work is attempted."""
+    with pytest.raises(ValueError, match=r"Width must be positive, got 0"):
+        generate_image("test", temp_dir / "image.png", width=0, height=512)
+
+    mock_unload.assert_not_called()
+    mock_get_model.assert_not_called()
+
+
+@patch("image_generator._get_model")
+@patch("image_generator.unload_all_models")
 def test_generate_image_rejects_negative_seed(mock_unload, mock_get_model, temp_dir):
     """A negative seed must raise ValueError before any model work is attempted."""
     with pytest.raises(ValueError, match=r"Seed must be non-negative, got -5"):
