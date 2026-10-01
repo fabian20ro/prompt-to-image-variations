@@ -517,6 +517,32 @@ class TestMetadataManager:
         assert layout["images_per_prompt"] == 2
         assert layout["max_prompts"] == 1
 
+    def test_resolve_gallery_layout_explicit_none_max_prompts_not_fall_back(self):
+        """An explicit null max_prompts in gallery_layout is respected, not a fallback trigger.
+
+        resolve_gallery_layout's max_prompts fallback guard is asymmetric: it falls back
+        to image_generation's max_prompts only when the ``max_prompts`` key is *absent*
+        from gallery_layout, not when the key is present with a null value. This matches
+        the ``if max_prompts is None and "max_prompts" not in gallery_layout`` guard in
+        metadata_manager.py.
+
+        A persisted explicit null therefore means "no prompt cap" and must resolve to
+        None, even when image_generation carries a max_prompts value. A refactor that
+        simplifies the guard to a plain ``is None`` check would wrongly resurrect the
+        cap from image_generation (None -> 5 here).
+        """
+        metadata = {
+            "gallery_layout": {"max_prompts": None},
+            "image_generation": {"max_prompts": 5},
+        }
+
+        layout = resolve_gallery_layout(metadata)
+
+        # Explicit null in gallery_layout must NOT fall back to image_generation.
+        assert layout["max_prompts"] is None
+        # Sibling field still resolves independently (key absent -> default 1).
+        assert layout["images_per_prompt"] == 1
+
 
 class TestConvenienceFunctions:
     """Tests for convenience functions."""

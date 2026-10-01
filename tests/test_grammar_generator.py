@@ -559,6 +559,16 @@ class TestGrammarStructureValidation(unittest.TestCase):
                 "subject": ["fox", "owl", "hare", "badger"],
             })
 
+    def test_rejects_eight_alternatives(self):
+        # The 5–7 range has a hard upper bound; a varying rule with 8 options
+        # exceeds the Tracery variation contract and must be rejected before
+        # caching — catching a regression that drops the upper-bound check.
+        with self.assertRaisesRegex(ValueError, r"received 8$"):
+            validate_grammar_structure({
+                "origin": ["A #subject#."],
+                "subject": ["fox", "owl", "hare", "badger", "deer", "lynx", "boar", "moose"],
+            })
+
     def test_rejects_missing_referenced_rule(self):
         with self.assertRaisesRegex(ValueError, "missing rules: light"):
             validate_grammar_structure({

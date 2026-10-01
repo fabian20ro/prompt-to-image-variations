@@ -462,6 +462,44 @@ class TestRunFromGrammarText:
             meta_content = json.load(f)
         assert meta_content["source"] == "custom_import"
 
+    @patch("pipeline.run_tracery")
+    @patch("pipeline.create_gallery")
+    @patch("pipeline.generate_master_index")
+    def test_tiled_vae_value_persisted_to_metadata(self, mock_index, mock_gallery, mock_tracery, temp_dir):
+        """The configured tiled_vae value must be persisted into the metadata block.
+
+        run_from_grammar_text writes tiled_vae into the image_generation block, and
+        downstream regenerate_image / enhance_images read it back via
+        image_settings.get("tiled_vae", True). The reader's default is True, so if
+        the writer drops or renames the key, a user who explicitly chose
+        tiled_vae=False would be silently re-run with tiling enabled — a
+        success=True result never surfaces that corruption. Pinning the non-default
+        False value keeps the assertion load-bearing: it fails on both a missing key
+        and a flipped value, which no "success" assertion would catch.
+        """
+        mock_tracery.return_value = ["prompt 1"]
+        mock_gallery.return_value = temp_dir / "prompts" / "test_gallery.html"
+
+        with patch("pipeline.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "prompts"
+            mock_paths.prompts_dir.mkdir(parents=True)
+            mock_paths.generated_dir = temp_dir
+
+            executor = PipelineExecutor()
+            result = executor.run_from_grammar_text(
+                grammar='{"origin": ["test"]}',
+                count=1,
+                prefix="tv",
+                generate_images=False,
+                tiled_vae=False,
+            )
+
+        assert result.success is True
+        meta_file = result.output_dir / "tv.metaprompt.json"
+        with open(meta_file) as f:
+            meta_content = json.load(f)
+        assert meta_content["image_generation"]["tiled_vae"] is False
+
 
 class TestRunFromGrammar:
     """Tests for run_from_grammar method."""
