@@ -292,3 +292,6 @@ def test_run_full_pipeline_resume_skips_existing_images(tmp_path):
 
     assert result.success is True
     assert result.skipped_count == 5
+    # Resumed, already-present images must be reported as skipped, not
+    # double-counted as generated in the aggregate result.
+    assert result.image_count == 0
