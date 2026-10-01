@@ -841,3 +841,28 @@ class TestGenerateRequestImagesPerPrompt:
         # Above upper bound
         with pytest.raises(ValidationError):
             GenerateRequest(prompt="test", images_per_prompt=101)
+
+
+class TestGenerateRequestMaxPrompts:
+    """Tests for GenerateRequest max_prompts constraint (ge=1)."""
+
+    def test_max_prompts_default_is_none(self):
+        req = GenerateRequest(prompt="test")
+        assert req.max_prompts is None
+
+    def test_max_prompts_zero_rejected(self):
+        """GenerateRequest.max_prompts uses ge=1 — 0 must be rejected."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", max_prompts=0)
+
+    def test_max_prompts_negative_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", max_prompts=-1)
+
+    def test_max_prompts_valid(self):
+        req = GenerateRequest(prompt="test", max_prompts=50)
+        assert req.max_prompts == 50
