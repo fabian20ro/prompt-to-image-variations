@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from config import settings
-from cli import main, clean_generated, cli_progress, _status_echo
+from cli import main, clean_generated, cli_progress, _status_echo, list_generated
 
 
 class TestStatusEcho:
@@ -131,6 +131,99 @@ class TestCliCleanCommand:
             assert parsed["success"] is True
             assert parsed["cleaned_count"] == 3
             mock_clean.assert_called_once()
+
+
+class TestCliListCommand:
+    """Tests for --list flag (read-only inspection of generated runs)."""
+
+    def test_list_nonexistent_dir_no_runs(self, temp_dir):
+        """Test --list with a nonexistent prompts directory prints 'No runs found.' and exits 0."""
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "does_not_exist"
+            result = runner.invoke(main, ["--list"])
+        assert result.exit_code == 0
+        assert "No runs found." in result.output
+
+    def test_list_empty_dir_no_runs(self, temp_dir):
+        """Test --list with an empty prompts directory prints 'No runs found.' and exits 0."""
+        prompts = temp_dir / "prompts"
+        prompts.mkdir()
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+        assert result.exit_code == 0
+        assert "No runs found." in result.output
+
+    def test_list_runs_shows_name_and_count(self, temp_dir):
+        """Test --list prints one line per run subdirectory with its file count."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+        (prompts / "run_a" / "p2.txt").write_text("b")
+        (prompts / "run_b").mkdir()
+        (prompts / "run_b" / "p3.txt").write_text("c")
+        (prompts / "stray.txt").write_text("not a run")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert "run_a: 2 prompts" in result.output
+        assert "run_b: 1 prompts" in result.output
+        assert "stray" not in result.output
+
+    def test_list_json_outputs_array(self, temp_dir):
+        """Test --list --json emits a valid JSON array with run_id and prompt_count."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+        (prompts / "run_a" / "p2.txt").write_text("b")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert isinstance(parsed, list)
+        assert {"run_id": "run_a", "prompt_count": 2} in parsed
+        for entry in parsed:
+            assert isinstance(entry["run_id"], str)
+            assert isinstance(entry["prompt_count"], int)
+
+    @patch("cli.PipelineExecutor")
+    @patch("cli.check_lm_studio")
+    def test_list_does_not_run_pipeline(self, mock_check, mock_executor_cls):
+        """Test --list is read-only: no LM Studio connection and no pipeline execution."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--list"])
+        assert result.exit_code == 0
+        mock_check.assert_not_called()
+        mock_executor_cls.assert_not_called()
+        assert "Generating grammar" not in result.output
+
+    def test_list_generated_reads_prompts_dir_not_grammars_dir(self, temp_dir, capsys):
+        """Regression: list_generated must read prompts_dir, not grammars_dir."""
+        grammars = temp_dir / "grammars"
+        prompts = temp_dir / "prompts"
+        (grammars / "run_a").mkdir(parents=True)
+        (grammars / "run_a" / "g.json").write_text("{}")
+        (prompts / "run_b").mkdir(parents=True)
+        (prompts / "run_b" / "p.txt").write_text("x")
+
+        with patch("cli.paths") as mock_paths:
+            mock_paths.grammars_dir = grammars
+            mock_paths.prompts_dir = prompts
+            list_generated()
+
+        captured = capsys.readouterr()
+        assert "run_b" in captured.out
+        assert "run_a" not in captured.out
 
 
 class TestCliValidation:

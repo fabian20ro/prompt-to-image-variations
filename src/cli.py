@@ -44,6 +44,27 @@ def clean_generated():
     return count
 
 
+def list_generated(as_json: bool = False, quiet: bool = False) -> None:
+    """List existing generated prompt runs with their prompt counts (read-only)."""
+    runs = []
+    if paths.prompts_dir.exists():
+        for d in sorted(paths.prompts_dir.iterdir()):
+            if d.is_dir():
+                count = sum(1 for p in d.iterdir() if p.is_file())
+                runs.append({"run_id": d.name, "prompt_count": count})
+
+    if quiet:
+        return
+    if as_json:
+        click.echo(json.dumps(runs, indent=2))
+        return
+    if not runs:
+        click.echo("No runs found.")
+        return
+    for run in runs:
+        click.echo(f"{run['run_id']}: {run['prompt_count']} prompts")
+
+
 def cli_progress(stage: str, current: int = 0, total: int = 0, message: str = "") -> None:
     """Progress callback for CLI that uses click.echo."""
     if message:
@@ -68,6 +89,11 @@ def _status_echo(message: str) -> None:
     '--clean',
     is_flag=True,
     help='Remove all generated files (grammars and prompts)'
+)
+@click.option(
+    '--list', 'as_list',
+    is_flag=True,
+    help='List existing generated prompt runs and their prompt counts'
 )
 @click.option(
     '-n', '--count',
@@ -241,6 +267,7 @@ def main(
     quiet: bool = False,
     version_check: bool = False,
     dump_config: bool = False,
+    as_list: bool = False,
 ):
     """
     Generate ERNIE-Image-Turbo prompt variations using local LLM-powered Tracery grammars.
@@ -286,6 +313,11 @@ def main(
             sys.exit(1)
 
     # LM Studio is required only when creating a grammar.
+
+    # Handle --list: read-only inspection, no pipeline or LM Studio needed
+    if as_list:
+        list_generated(as_json=as_json, quiet=quiet)
+        return
 
     # Handle --clean
     if clean:
