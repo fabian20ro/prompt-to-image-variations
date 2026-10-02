@@ -440,8 +440,15 @@ def test_enhance_image_invalid_width(width, message):
             enhance_image(img_path, out_path, width=width, height=800)
 
 
-@pytest.mark.parametrize("height", [0, -4, 7])
-def test_enhance_image_invalid_height(height):
+@pytest.mark.parametrize(
+    ("height", "message"),
+    [
+        (0, "Height must be positive."),
+        (-4, "Height must be positive."),
+        (7, "Height must be a multiple of 8."),
+    ],
+)
+def test_enhance_image_invalid_height(height, message):
     from image_enhancer import enhance_image
     from PIL import Image
     import tempfile
@@ -449,7 +456,7 @@ def test_enhance_image_invalid_height(height):
         img_path = Path(tmpdir) / "test.png"
         out_path = Path(tmpdir) / "out.png"
         Image.new("RGB", (10, 10)).save(img_path)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=message):
             enhance_image(img_path, out_path, width=800, height=height)
 
 
