@@ -108,6 +108,27 @@ class TestQueueManager:
         assert state.completed[0].status == TaskStatus.FAILED
         assert state.completed[0].error == "Something went wrong"
 
+    def test_complete_task_caps_completed_history(self, queue_path):
+        """The completed history should retain only the newest 50 tasks, newest first."""
+        qm = QueueManager(queue_path)
+
+        # Run and complete 51 tasks sequentially (the queue starts one at a time).
+        for i in range(51):
+            task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": f"test-{i:03d}"})
+            running = qm.get_next_task()
+            assert running is not None
+            qm.complete_task(running.id, {"ok": True})
+
+        state = qm.get_state()
+        assert len(state.completed) == 50
+        # Newest completion sits at the head of the history...
+        assert state.completed[0].id == task.id
+        assert state.completed[0].result == {"ok": True}
+        # ...while the oldest completion was trimmed by the 50-entry cap.
+        assert all(t.id != task.id for t in state.completed[1:])
+        assert len(state.pending) == 0
+        assert state.current_task is None
+
     def test_update_progress(self, queue_path):
         """Test updating task progress."""
         qm = QueueManager(queue_path)

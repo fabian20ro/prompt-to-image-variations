@@ -167,6 +167,26 @@ def test_system_prompt_enforces_grammar_rule_format():
         ), f"Grammar structural invariant missing from system prompt: {invariant}"
 
 
+def test_system_prompt_requires_strict_json_output():
+    """Verify the template mandates strict JSON output: double-quoted strings and no trailing commas.
+
+    Tracery grammars are parsed with ``json.loads`` / ``JSONDecoder.raw_decode`` after the
+    LLM response is cleaned. Strict JSON forbids trailing commas, so the system prompt must
+    explicitly require double-quoted strings and no trailing commas — otherwise the model
+    could emit a trailing comma that ``json.loads`` rejects, making generation fail with a
+    spurious invalid-JSON error. This confirms the output-discipline contract is enforced
+    upstream, in the prompt itself.
+    """
+    prompt = get_system_prompt()
+    for constraint in [
+        "double-quoted",
+        "no trailing commas",
+    ]:
+        assert (
+            constraint in prompt
+        ), f"Strict JSON output constraint missing from system prompt: {constraint}"
+
+
 def test_system_prompt_limits_rule_count():
     """Verify the template caps rule count at 8 to keep grammars compact and parseable.
 
