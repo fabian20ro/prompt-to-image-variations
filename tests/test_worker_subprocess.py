@@ -48,6 +48,35 @@ class TestEmitFunctions:
         assert data["current"] == 5
         assert data["total"] == 10
         assert data["message"] == "Test message"
+        assert data["percent"] == 50
+        assert set(data.keys()) == {
+            "type", "stage", "current", "total", "message", "percent",
+        }
+
+    @pytest.mark.parametrize(
+        ("current", "total", "expected_percent"),
+        [
+            (5, 10, 50),
+            (1, 3, 33),
+            (0, 0, 0),
+            (7, 8, 88),
+        ],
+    )
+    def test_emit_progress_percent(
+        self, capsys, current: int, total: int, expected_percent: int
+    ):
+        """Test the pre-computed percent field, including the zero-total guard."""
+        emit_progress("gen", current, total, "")
+
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+
+        assert data["type"] == "progress"
+        assert data["stage"] == "gen"
+        assert data["current"] == current
+        assert data["total"] == total
+        assert data["message"] == ""
+        assert data["percent"] == expected_percent
 
     def test_emit_result_success(self, capsys):
         """Test that emit_result outputs success JSON."""
