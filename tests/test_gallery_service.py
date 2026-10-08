@@ -307,6 +307,23 @@ class TestGalleryService:
         service = GalleryService(temp_dir, temp_dir)
         assert service.is_backup_run(temp_dir) is False
 
+    def test_is_backup_run_backup_info_without_is_backup_key(self, temp_dir):
+        """Test is_backup_run returns False when backup_info exists but lacks is_backup.
+
+        The nested .get chain (backup_info -> is_backup) must fall back to False
+        when the inner key is absent; a truthy backup_info block alone must not
+        mark a run as a backup.
+        """
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "backup_info": {
+                "source_run_id": "original",
+            },
+        }))
+
+        service = GalleryService(temp_dir, temp_dir)
+        assert service.is_backup_run(temp_dir) is False
+
     def test_count_images(self, temp_dir):
         """Test counting images."""
         (temp_dir / "test.metaprompt.json").write_text(json.dumps({"prefix": "test"}))
