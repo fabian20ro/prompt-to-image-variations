@@ -60,12 +60,14 @@ def log_to_file(message: str) -> None:
 
 def emit_progress(stage: str, current: int = 0, total: int = 0, message: str = ""):
     """Emit progress update to stdout."""
+    percent = round(current / total * 100) if total else 0
     data = {
         "type": "progress",
         "stage": stage,
         "current": current,
         "total": total,
         "message": message,
+        "percent": percent,
     }
     print(json.dumps(data), flush=True)
     if message:

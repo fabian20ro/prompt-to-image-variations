@@ -1,6 +1,7 @@
 """Tests for utility functions."""
 
 import json
+import re
 
 import pytest
 from PIL import Image
@@ -174,6 +175,9 @@ class TestUtils:
         filename = saved_files[0].name
         assert filename.startswith("test_")
         assert filename.endswith("_0_0.png")
+        # The timestamp segment must follow the flat archive contract
+        # (YYYYMMDD_HHMMSS) so scan_flat_archives can re-parse the name.
+        assert re.fullmatch(r"test_\d{8}_\d{6}_0_0\.png", filename)
 
         # Check that metadata is embedded in PNG
         metadata = get_flat_archive_metadata(saved_files[0])

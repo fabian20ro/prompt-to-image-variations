@@ -411,7 +411,15 @@ class TestWorkerExecuteTask:
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await worker._execute_task(task)
 
-        worker.queue_manager.update_progress.assert_called()
+        worker.queue_manager.update_progress.assert_called_once_with(
+            task.id,
+            TaskProgress(
+                stage="generating",
+                current=1,
+                total=10,
+                message="Working...",
+            ),
+        )
 
     @pytest.mark.asyncio
     async def test_execute_task_handles_image_ready(self, worker):

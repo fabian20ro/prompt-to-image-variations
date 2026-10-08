@@ -497,6 +497,27 @@ class TestGalleryIndexInteractive:
         assert "/gallery/20240101_120000_xxx/image_20240101_120000_0.png" in html
         assert 'href="/gallery/20240101_120000_xxx"' in html
 
+    def test_build_card_html_interactive_archive_uses_archive_route(self):
+        """Interactive archive card must use /archive/ route and omit the delete button."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_100000_arch",
+            "gallery_path": "saved/20240101_100000_arch/test_gallery.html",
+            "thumbnail_file": "image_20240101_100000_0.png",
+            "thumbnail": None,
+            "backup_reason": "manual_archive",
+        }
+        html = _build_card_html(run, interactive=True, is_archive=True)
+        assert 'href="/archive/20240101_100000_arch"' in html
+        assert 'src="/archive/20240101_100000_arch/image_20240101_100000_0.png"' in html
+        assert "/gallery/" not in html
+        assert "btn-delete" not in html
+
     def test_flat_archive_prompt_counting_reflects_unique_indices(self, temp_dir):
         """Flat archive card should reflect distinct prompt indices from filenames.
 

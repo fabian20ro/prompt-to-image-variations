@@ -513,6 +513,16 @@ def test_cache_persists_all_three_files(tmp_path, monkeypatch):
     assert (mock_cache_dir / f"{prompt_hash}.tracery.json").read_text() == grammar_content
     assert (mock_cache_dir / f"{prompt_hash}.raw.txt").read_text() == raw_response
 
+    # The metadata file must persist every provenance field with the correct values.
+    # Guards against a silent metadata schema drift (renamed/dropped/retyped key)
+    # that an existence-only check would miss.
+    metadata = json.loads((mock_cache_dir / f"{prompt_hash}.metaprompt.json").read_text())
+    assert metadata["user_prompt"] == user_prompt
+    assert metadata["hash"] == prompt_hash
+    assert metadata["prompt_schema"] == grammar_gen.PROMPT_SCHEMA_VERSION
+    assert metadata["lm_model"] == settings.lm_studio.model
+    assert "created_at" in metadata
+
 
 def test_get_cached_grammar_independent_of_raw_file(tmp_path, monkeypatch):
     """Grammar file is readable even if raw response file was lost (e.g., crash between writes)."""
@@ -792,6 +802,61 @@ def test_generate_grammar_returns_cached_without_http_call(tmp_path, monkeypatch
     assert was_cached is True
     assert grammar_out == grammar_content
     assert raw_out == stored_raw
+
+
+def test_generate_grammar_empty_cache_entry_is_miss_not_hit(tmp_path, monkeypatch):
+    """generate_grammar must treat a present-but-EMPTY cache entry as a cache miss.
+
+    get_cached_grammar returns the cache file's text verbatim: a missing file yields
+    None, but a file that exists and is empty yields "" (falsy). generate_grammar
+    gates the cache short-circuit on truthiness (``if cached:``), so an empty entry
+    must NOT be served — it must fall through to a fresh LM Studio call, regenerate
+    a valid grammar, and re-cache it, returning was_cached=False.
+
+    This pins the None-vs-empty boundary at the public generate_grammar gate. If the
+    gate were loosened to ``if cached is not None:`` (or the getter coerced an empty
+    file into a non-None sentinel), a blank entry would be served as a hit with
+    was_cached=True and no HTTP call — delivering a useless blank grammar to callers.
+    """
+    mock_cache_dir = tmp_path / "grammars"
+    mock_cache_dir.mkdir()
+    monkeypatch.setattr("src.grammar_generator.CACHE_DIR", mock_cache_dir)
+
+    user_prompt = "a prompt whose cached grammar went blank"
+    prompt_hash = hash_prompt(user_prompt)
+
+    # Simulate a present-but-empty cache entry (e.g. a crash truncated the file to
+    # zero bytes). The file physically exists, so get_cached_grammar returns "" not
+    # None — but the entry carries no usable grammar.
+    grammar_file = mock_cache_dir / f"{prompt_hash}.tracery.json"
+    grammar_file.write_text("")
+    assert grammar_file.exists()
+    assert get_cached_grammar(prompt_hash) == ""
+
+    # The LLM is mocked to return a valid grammar so the regenerate path completes.
+    regenerated_grammar = '{"origin": ["#a#", "#b#", "#c#", "#d#", "#e#"], "a": ["x"], "b": ["y"], "c": ["z"], "d": ["w"], "e": ["v"]}'
+    fake_raw = '```json\n' + regenerated_grammar + '\n```'
+    with patch("src.grammar_generator.requests.post") as mock_post:
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "output": [{"type": "message", "content": fake_raw}]
+        }
+        mock_response.raise_for_status = lambda: None
+        mock_post.return_value = mock_response
+        with patch("src.grammar_generator.ensure_lm_model_loaded"):
+            grammar_out, was_cached, raw_out = generate_grammar(
+                user_prompt=user_prompt, use_cache=True
+            )
+
+    # Empty entry is a MISS: exactly one fresh LM Studio call happened.
+    mock_post.assert_called_once()
+    # The regenerated grammar is returned — not the blank cache entry.
+    assert was_cached is False
+    assert grammar_out == regenerated_grammar
+    assert raw_out == fake_raw
+
+    # And the blank entry was re-cached with the valid regenerated grammar.
+    assert get_cached_grammar(prompt_hash) == regenerated_grammar
 
 
 def test_clean_grammar_output_text_before_json():

@@ -199,6 +199,20 @@ class TestConfig:
             result = _get_env_str("PROMPT_GEN_LM_STUDIO_URL", LMStudioConfig.base_url)
             assert result == LMStudioConfig.base_url
 
+    def test_get_env_str_returns_default_when_key_absent(self):
+        """Test that _get_env_str returns the default when the env key is absent.
+
+        Covers the `val is None` branch of _get_env_str, distinct from the
+        empty/whitespace branch in test_get_env_str_ignores_empty_string: when a key
+        is not set at all, os.environ.get returns None and the helper must fall back
+        to the provided default rather than returning a blank value or raising.
+        """
+        from config import _get_env_str, LMStudioConfig
+
+        with patch.dict(os.environ, {}, clear=True):
+            result = _get_env_str("PROMPT_GEN_LM_STUDIO_URL", LMStudioConfig.base_url)
+        assert result == LMStudioConfig.base_url
+
     def test_get_env_float_rejects_nan(self):
         """Test that _get_env_float returns default and logs warning on NaN."""
         from config import _get_env_float, logger, ServerConfig

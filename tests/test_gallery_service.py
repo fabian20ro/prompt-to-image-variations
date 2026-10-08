@@ -78,6 +78,30 @@ class TestGalleryService:
         with pytest.raises(GalleryNotFoundError, match="Gallery not found"):
             service.get_run_directory("../outside/20240101_120000_abc123")
 
+    def test_get_run_directory_rejects_symlink_escaping_base(self, temp_dir):
+        """Test get_run_directory rejects a symlink that points outside prompts/.
+
+        The guard resolves the path (Path.resolve follows symlinks) before the
+        containment check, so a run entry that exists inside prompts/ but links
+        to a directory outside must be rejected. A plain lexical ".." check
+        would let such a symlink escape, so the ".." traversal test alone does
+        not prove the resolve-based guard.
+        """
+        import os
+
+        prompts_dir = temp_dir / "prompts"
+        saved_dir = temp_dir / "saved"
+        prompts_dir.mkdir()
+        # A real directory that exists but lives OUTSIDE prompts/.
+        outside = temp_dir / "outside" / "20240101_120000_abc123"
+        outside.mkdir(parents=True)
+        # A symlink inside prompts/ pointing at the outside directory.
+        os.symlink(outside, prompts_dir / "20240101_120000_abc123")
+
+        service = GalleryService(prompts_dir, saved_dir)
+        with pytest.raises(GalleryNotFoundError, match="Gallery not found"):
+            service.get_run_directory("20240101_120000_abc123")
+
     def test_get_run_directory_archive_rejects_path_traversal(self, temp_dir):
         """Test get_run_directory in archive mode rejects a run_id that escapes saved/.
 
