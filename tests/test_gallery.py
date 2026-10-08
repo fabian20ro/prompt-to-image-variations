@@ -756,6 +756,12 @@ class TestCreateGallery:
 
         content = gallery.read_text()
         assert '<p class="status">Generated: 2 / 2 images</p>' in content
+        # Existing on-disk images must render as <img> tags, not "Pending..." placeholders.
+        # Catches a status-vs-card desync: the status line above would still read 2/2
+        # even if the card loop wrongly rendered placeholders for existing files.
+        assert '<img src="done_0_0.png"' in content
+        assert '<img src="done_1_0.png"' in content
+        assert content.count('<div class="placeholder">Pending...</div>') == 0
 
     def test_create_gallery_escapes_special_chars_in_prompts(self, temp_dir):
         """create_gallery must HTML-escape prompt text to prevent injection."""
