@@ -578,6 +578,26 @@ class TestGetRecentRevisions:
 
         assert [entry["id"] for entry in result] == ["r3"]
 
+    def test_action_filter_applies_to_full_copy_when_n_zero(self):
+        """action_filter must narrow the n<=0 full-copy branch, not just the window.
+
+        The n<=0 branch builds ``result`` via ``list(history)`` — the entire history,
+        not a slice — and the action_filter comprehension then runs over that result.
+        Every existing action_filter test uses a positive n, and every n<=0 test omits
+        the filter, so the documented composition of the two is unexercised: a refactor
+        that gated the filter on ``n > 0`` (silently returning unfiltered entries on
+        the full-copy path) or that made ``n=0`` mean "no entries" would pass them all.
+        """
+        history = [
+            {"id": "r0", "action": "update", "grammar": "g0"},
+            {"id": "r1", "action": "rollback", "grammar": "g1"},
+            {"id": "r2", "action": "update", "grammar": "g2"},
+        ]
+
+        result = get_recent_revisions(history, n=0, action_filter="update")
+
+        assert [entry["id"] for entry in result] == ["r0", "r2"]
+
     def test_include_action_none_returns_full_entries(self):
         """include_action=None must return full entries (like False, not like True).
 

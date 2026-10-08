@@ -213,6 +213,24 @@ class TestConfig:
             result = _get_env_str("PROMPT_GEN_LM_STUDIO_URL", LMStudioConfig.base_url)
         assert result == LMStudioConfig.base_url
 
+    def test_get_env_float_returns_default_when_key_absent(self):
+        """Test that _get_env_float returns the default when the env key is absent.
+
+        Covers the `val is None` branch of _get_env_float, distinct from the
+        empty/whitespace branch covered in test_settings_from_env_empty_string_falls_back:
+        when a key is not set at all, os.environ.get returns None and the helper must
+        return the provided default silently. A missing None guard (e.g. calling
+        val.strip() on None) would raise here; a spurious warning for a healthy unset
+        key is also caught.
+        """
+        from config import _get_env_float, logger, ServerConfig
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(logger, "warning") as mock_warn:
+            result = _get_env_float("PROMPT_GEN_SSE_TIMEOUT", ServerConfig.sse_timeout)
+        assert result == ServerConfig.sse_timeout
+        mock_warn.assert_not_called()
+
     def test_get_env_float_rejects_nan(self):
         """Test that _get_env_float returns default and logs warning on NaN."""
         from config import _get_env_float, logger, ServerConfig
