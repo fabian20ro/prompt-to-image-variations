@@ -697,6 +697,17 @@ class TestGrammarStructureValidation(unittest.TestCase):
                 "color": ["red", "blue", "green", "yellow", "black"],
             })
 
+    def test_rejects_non_string_options(self):
+        # LLM output can contain non-string alternatives (numbers, booleans, null).
+        # The validator's isinstance guard must reject them before they reach
+        # caching; it short-circuits before .strip() so a numeric option cannot
+        # raise AttributeError and be misreported as a different failure.
+        with self.assertRaisesRegex(ValueError, "must contain non-empty strings"):
+            validate_grammar_structure({
+                "origin": ["#subject#"],
+                "subject": ["fox", 1, "hare", "badger", "deer"],
+            })
+
 
 if __name__ == "__main__":
     unittest.main()
