@@ -513,6 +513,16 @@ def test_cache_persists_all_three_files(tmp_path, monkeypatch):
     assert (mock_cache_dir / f"{prompt_hash}.tracery.json").read_text() == grammar_content
     assert (mock_cache_dir / f"{prompt_hash}.raw.txt").read_text() == raw_response
 
+    # The metadata file must persist every provenance field with the correct values.
+    # Guards against a silent metadata schema drift (renamed/dropped/retyped key)
+    # that an existence-only check would miss.
+    metadata = json.loads((mock_cache_dir / f"{prompt_hash}.metaprompt.json").read_text())
+    assert metadata["user_prompt"] == user_prompt
+    assert metadata["hash"] == prompt_hash
+    assert metadata["prompt_schema"] == grammar_gen.PROMPT_SCHEMA_VERSION
+    assert metadata["lm_model"] == settings.lm_studio.model
+    assert "created_at" in metadata
+
 
 def test_get_cached_grammar_independent_of_raw_file(tmp_path, monkeypatch):
     """Grammar file is readable even if raw response file was lost (e.g., crash between writes)."""
