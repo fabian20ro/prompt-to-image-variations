@@ -63,6 +63,13 @@ class TestParseGrammar:
         with pytest.raises(TraceryError, match="Invalid JSON grammar"):
             parse_grammar('{"origin": ["incomplete"')
 
+    def test_parse_grammar_preserves_underlying_error_detail(self):
+        """Test that the underlying JSONDecodeError detail is preserved in TraceryError."""
+        # parse_grammar wraps the original exception: f"Invalid JSON grammar: {e}".
+        # Assert the JSONDecodeError detail ("Expecting value") appears in the message.
+        with pytest.raises(TraceryError, match="Expecting value"):
+            parse_grammar("")
+
 
 class TestGenerateOne:
     """Tests for single text generation from grammar."""
