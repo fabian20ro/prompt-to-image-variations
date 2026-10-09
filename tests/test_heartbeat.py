@@ -182,6 +182,21 @@ async def test_heartbeat_thread_stops_when_emit_raises():
             "Failure log must identify the heartbeat emission failure"
 
 
+@pytest.mark.asyncio
+async def test_heartbeat_exit_returns_false():
+    """Test that Heartbeat.__exit__ returns False, ensuring exceptions raised inside
+    the with block propagate to the caller rather than being silently suppressed."""
+
+    with patch('src.server.worker_subprocess.emit_progress'):
+        hb = Heartbeat(message="test", interval=1.0)
+        hb.__enter__()
+        exc = ValueError("simulated pipeline error")
+        result = hb.__exit__(type(exc), exc, exc.__traceback__)
+
+    assert result is False, \
+        "Heartbeat.__exit__ must return False so that exceptions are not suppressed"
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__])
