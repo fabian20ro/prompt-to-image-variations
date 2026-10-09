@@ -39,6 +39,13 @@ def test_get_model_cache_hit():
     clear_model_cache()
 
 
+def test_get_model_cache_hit_non_tiled():
+    cached = MagicMock()
+    _model_cache[False] = cached
+    assert _get_model(tiled_vae=False) is cached
+    clear_model_cache()
+
+
 @patch("image_generator.settings")
 @patch("image_generator._model_cache", {})
 def test_get_model_loads_local_ernie_q4(mock_settings, temp_dir):
