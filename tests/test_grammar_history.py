@@ -50,6 +50,7 @@ class TestLoadGrammarHistory:
         result = load_grammar_history(run_dir, "test", current_grammar=grammar_text)
         assert len(result) == 1
         assert result[0]["id"] == "initial"
+        assert result[0]["action"] == "initial"
         assert result[0]["grammar"] == grammar_text
 
     def test_falls_back_to_current_grammar_on_corrupted_json(self, run_dir):
