@@ -763,6 +763,30 @@ class TestCreateGallery:
         assert '<img src="done_1_0.png"' in content
         assert content.count('<div class="placeholder">Pending...</div>') == 0
 
+    def test_create_gallery_partial_completion_counts_and_mixed_cards(self, temp_dir):
+        """On resume, create_gallery counts only the images that exist and renders a mix
+        of real <img> cards and Pending placeholders with an intermediate status line."""
+        from gallery import create_gallery
+
+        # Only one of the two expected images is present on disk.
+        (temp_dir / "p_0_0.png").write_bytes(b"fake")
+        # p_1_0.png intentionally left absent.
+
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="p",
+            prompts=["first", "second"],
+            images_per_prompt=1,
+        )
+
+        content = gallery.read_text()
+        # Intermediate completion status: 1 of 2 total images.
+        assert '<p class="status">Generated: 1 / 2 images</p>' in content
+        # The existing image renders as a real <img> card; the missing one stays pending.
+        assert '<img src="p_0_0.png"' in content
+        assert content.count('<img src="p_') == 1
+        assert content.count('<div class="placeholder">Pending...</div>') == 1
+
     def test_create_gallery_escapes_special_chars_in_prompts(self, temp_dir):
         """create_gallery must HTML-escape prompt text to prevent injection."""
         import html as html_mod
