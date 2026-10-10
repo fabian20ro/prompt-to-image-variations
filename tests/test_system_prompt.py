@@ -230,6 +230,21 @@ def test_system_prompt_enforces_varying_rule_minimum():
         ), f"Varying-rule minimum requirement missing from system prompt: {invariant}"
 
 
+def test_system_prompt_allows_five_or_six_alternatives():
+    """Verify the template documents the 5–6 alternative tolerance clause.
+
+    validate_grammar_structure accepts 5–7 alternatives per varying rule.
+    The template must document that 5–6 is acceptable when 7 genuinely
+    distinct choices would reduce quality; without this escape hatch the
+    model is forced to pad to exactly 7, producing near-duplicate options.
+    """
+    prompt = get_system_prompt()
+    assert "Five or six are acceptable" in prompt, (
+        "5–6 alternative tolerance clause missing from system prompt — "
+        "model would be forced to always emit 7 alternatives even when fewer are better"
+    )
+
+
 def test_system_prompt_requires_concrete_position_vocabulary():
     """Verify the template mandates concrete spatial language instead of vague placement.
 

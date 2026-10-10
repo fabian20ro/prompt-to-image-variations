@@ -510,6 +510,11 @@ class TestWorkerExecuteTask:
                 # Should have logged a warning about invalid JSON
                 mock_warn.assert_called()
 
+        # Non-JSON noise on a clean exit must not fail the task: with no
+        # parsed result data, the task completes as None instead of failing.
+        worker.queue_manager.complete_task.assert_called_once_with(task.id, None)
+        worker.queue_manager.fail_task.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_execute_task_handles_nonzero_exit_empty_stderr(self, worker):
         """Test that non-zero exit with empty stderr uses fallback error message."""

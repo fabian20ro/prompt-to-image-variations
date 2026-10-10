@@ -45,13 +45,26 @@ def clean_generated():
 
 
 def list_generated(as_json: bool = False, quiet: bool = False) -> None:
-    """List existing generated prompt runs with their prompt counts (read-only)."""
+    """List existing generated prompt runs with their prompt and image counts (read-only)."""
+    image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
     runs = []
     if paths.prompts_dir.exists():
         for d in sorted(paths.prompts_dir.iterdir()):
             if d.is_dir():
-                count = sum(1 for p in d.iterdir() if p.is_file())
-                runs.append({"run_id": d.name, "prompt_count": count})
+                prompt_count = 0
+                image_count = 0
+                for f in d.iterdir():
+                    if f.is_file():
+                        suffix = f.suffix.lower()
+                        if suffix in image_extensions:
+                            image_count += 1
+                        elif suffix == ".txt":
+                            prompt_count += 1
+                runs.append({
+                    "run_id": d.name,
+                    "prompt_count": prompt_count,
+                    "image_count": image_count,
+                })
 
     if quiet:
         return
@@ -62,7 +75,11 @@ def list_generated(as_json: bool = False, quiet: bool = False) -> None:
         click.echo("No runs found.")
         return
     for run in runs:
-        click.echo(f"{run['run_id']}: {run['prompt_count']} prompts")
+        line = f"{run['run_id']}: {run['prompt_count']} prompts"
+        if run["image_count"]:
+            plural = "s" if run["image_count"] != 1 else ""
+            line += f", {run['image_count']} image{plural}"
+        click.echo(line)
 
 
 def cli_progress(stage: str, current: int = 0, total: int = 0, message: str = "") -> None:

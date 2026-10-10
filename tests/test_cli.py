@@ -176,6 +176,74 @@ class TestCliListCommand:
         assert "run_b: 1 prompts" in result.output
         assert "stray" not in result.output
 
+    def test_list_runs_with_images_shows_singular_image(self, temp_dir):
+        """Test --list distinguishes prompt and image counts (singular for one image)."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_img").mkdir(parents=True)
+        (prompts / "run_img" / "p1.txt").write_text("a")
+        (prompts / "run_img" / "p2.txt").write_text("b")
+        (prompts / "run_img" / "p1_0.png").write_text("binary")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert "run_img: 2 prompts, 1 image" in result.output
+
+    def test_list_runs_multiple_images_plural(self, temp_dir):
+        """Test --list uses the plural noun for more than one image."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_multi").mkdir(parents=True)
+        (prompts / "run_multi" / "p1.txt").write_text("a")
+        (prompts / "run_multi" / "p1_0.png").write_text("binary")
+        (prompts / "run_multi" / "p1_1.png").write_text("binary")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert "run_multi: 1 prompts, 2 images" in result.output
+
+    def test_list_runs_text_only_no_image_suffix(self, temp_dir):
+        """Test a run with only .txt files shows prompt count and no image suffix."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_txt").mkdir(parents=True)
+        (prompts / "run_txt" / "p1.txt").write_text("a")
+        (prompts / "run_txt" / "p2.txt").write_text("b")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert "run_txt: 2 prompts" in result.output
+        assert "image" not in result.output
+
+    def test_list_json_with_images_counts_by_type(self, temp_dir):
+        """Test --list --json reports prompt_count and image_count per file type."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_img").mkdir(parents=True)
+        (prompts / "run_img" / "p1.txt").write_text("a")
+        (prompts / "run_img" / "p2.txt").write_text("b")
+        (prompts / "run_img" / "p1_0.png").write_text("binary")
+        (prompts / "run_img" / "p2_0.png").write_text("binary")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        entry = next(e for e in parsed if e["run_id"] == "run_img")
+        assert entry["prompt_count"] == 2
+        assert entry["image_count"] == 2
+
     def test_list_json_outputs_array(self, temp_dir):
         """Test --list --json emits a valid JSON array with run_id and prompt_count."""
         prompts = temp_dir / "prompts"
@@ -191,10 +259,11 @@ class TestCliListCommand:
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert isinstance(parsed, list)
-        assert {"run_id": "run_a", "prompt_count": 2} in parsed
+        assert {"run_id": "run_a", "prompt_count": 2, "image_count": 0} in parsed
         for entry in parsed:
             assert isinstance(entry["run_id"], str)
             assert isinstance(entry["prompt_count"], int)
+            assert isinstance(entry["image_count"], int)
 
     @patch("cli.PipelineExecutor")
     @patch("cli.check_lm_studio")

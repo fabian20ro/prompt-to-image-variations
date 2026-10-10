@@ -146,6 +146,14 @@ class TestPipelineConfig:
         assert config.image.width == 1024
         assert config.enhancement.enabled is True
 
+    def test_to_dict_output_dir(self):
+        """PipelineConfig.to_dict() must serialize output_dir as str and omit it when None."""
+        config = PipelineConfig(output_dir=Path("/tmp/out"))
+        # A Path is serialized to its string form so the dict stays JSON-serializable.
+        assert config.to_dict()["output_dir"] == "/tmp/out"
+        # Documented None-exclusion: an unset output_dir must be omitted, not stored as null.
+        assert "output_dir" not in PipelineConfig().to_dict()
+
 class TestPipelineExecutorInit:
     """Tests for PipelineExecutor initialization."""
 

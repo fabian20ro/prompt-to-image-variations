@@ -150,6 +150,42 @@ class TestQueueManager:
         assert state.current_task.progress.current == 5
         assert state.current_task.progress.total == 10
 
+    def test_update_progress_emits_task_progress_event(self, queue_path):
+        """update_progress should emit a task_progress event with the progress payload, and no event for a non-matching id."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+        task = qm.add_task(TaskType.GENERATE_PIPELINE, {"prompt": "test"})
+        qm.get_next_task()
+
+        # Ignore notifications from add/get.
+        events.clear()
+
+        progress = TaskProgress(
+            stage="generating_images",
+            current=5,
+            total=10,
+            message="Working...",
+        )
+        qm.update_progress(task.id, progress)
+
+        # Exactly one event: the task_progress notification carrying the progress payload.
+        assert len(events) == 1
+        assert events[0][0] == "task_progress"
+        assert events[0][1]["task_id"] == task.id
+        assert events[0][1]["stage"] == "generating_images"
+        assert events[0][1]["current"] == 5
+        assert events[0][1]["total"] == 10
+        assert events[0][1]["message"] == "Working..."
+
+        # A non-matching task id must not emit a spurious notification.
+        qm.update_progress("nonexistent-id", progress)
+        assert len(events) == 1
+
     def test_cancel_pending_task(self, queue_path):
         """Test cancelling a pending task."""
         qm = QueueManager(queue_path)

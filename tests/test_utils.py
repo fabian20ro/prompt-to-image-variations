@@ -530,6 +530,22 @@ class TestUtils:
         result = _truncate_for_png(emoji, "prompt")
         assert len(result.encode("utf-8")) <= PNG_TEXT_MAX_BYTES
 
+    def test_truncate_for_png_drops_partial_character_at_boundary(self):
+        """Test a cap cut landing mid-character is trimmed, not garbled or crashed on.
+
+        The emoji-only test above cuts at a character boundary (8000 % 4 == 0),
+        so the byte-trim loop never runs. This input forces the 8000-byte cap to
+        land inside a 4-byte emoji, exercising the trim-until-decodable path.
+        """
+        # 7999 single-byte chars + 1000 4-byte emojis = 11999 bytes; the cap
+        # lands one byte inside the last emoji, so that partial byte must be dropped.
+        value = "a" * 7999 + "\U0001F680" * 1000
+        assert len(value.encode("utf-8")) > PNG_TEXT_MAX_BYTES
+
+        result = _truncate_for_png(value, "prompt")
+        assert result == "a" * 7999
+        assert len(result.encode("utf-8")) <= PNG_TEXT_MAX_BYTES
+
     def test_truncate_for_png_passes_through_empty(self):
         """Test empty string passes through unchanged."""
         assert _truncate_for_png("", "key") == ""
