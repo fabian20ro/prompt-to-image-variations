@@ -311,6 +311,11 @@ class TestGenerateAllEndpoint:
         assert queued_params["images_per_prompt"] == 0
         assert queued_params["resume"] is True
 
+    def test_generate_all_gallery_not_found(self, client):
+        """Test 404 for generating all images of a missing gallery."""
+        response = client.post("/api/gallery/nonexistent/generate-all")
+        assert response.status_code == 404
+
 
 class TestRegenerateEndpoint:
     """Tests for POST /api/gallery/{run_id}/regenerate."""
