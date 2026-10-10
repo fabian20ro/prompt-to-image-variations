@@ -221,6 +221,18 @@ class TestInputValidation:
         with pytest.raises(ValidationError):
             GenerateRequest(prompt="")
 
+    def test_generate_request_prompt_max_length(self):
+        """Test that prompt respects max_length=5000 on GenerateRequest."""
+        from pydantic import ValidationError
+
+        # Boundary: exactly 5000 is allowed
+        req = GenerateRequest(prompt="x" * 5000)
+        assert req.prompt == "x" * 5000
+
+        # Over limit: 5001 is rejected
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="x" * 5001)
+
     def test_generate_request_count_bounds(self):
         """Test that count must be within bounds."""
         from pydantic import ValidationError
