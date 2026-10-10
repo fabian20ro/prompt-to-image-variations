@@ -358,6 +358,13 @@ class TestRunGeneratePipeline:
         assert kwargs["width"] == 864
         assert kwargs["height"] == 1152
         assert kwargs["seed"] is None
+        # tiled_vae and enhance_after must be forwarded explicitly with the
+        # worker defaults (False). The pipeline signature defaults tiled_vae
+        # to True, so dropping the kwarg (or inverting the worker default)
+        # would silently enable tiled VAE decoding for every generation
+        # instead of honoring the API request model's False default.
+        assert "tiled_vae" in kwargs and kwargs["tiled_vae"] is False
+        assert "enhance_after" in kwargs and kwargs["enhance_after"] is False
 
 
 class TestRunGenerateFromGrammar:
