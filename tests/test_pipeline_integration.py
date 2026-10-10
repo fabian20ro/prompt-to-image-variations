@@ -181,6 +181,9 @@ def test_run_from_grammar_text_metadata_structure(tmp_path):
         )
 
     assert result.success is True
+    # run_id is the output directory name; downstream systems (gallery, master
+    # index) key off this identity, so it must not drift to a generated UUID/hash.
+    assert result.run_id == output_dir.name
     metadata_file = output_dir / "image.metaprompt.json"
     import json as _json
     metadata = _json.loads(metadata_file.read_text())
