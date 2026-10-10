@@ -543,6 +543,30 @@ class TestMetadataManager:
         # Sibling field still resolves independently (key absent -> default 1).
         assert layout["images_per_prompt"] == 1
 
+    def test_resolve_gallery_layout_explicit_none_images_per_prompt_falls_back(self):
+        """An explicit null images_per_prompt in gallery_layout falls back to image_generation.
+
+        The images_per_prompt fallback is the inverse of the max_prompts guard:
+        it falls back to image_generation's value whenever the resolved value is
+        None — including when the key is present with a null value — matching
+        the ``if images_per_prompt is None`` checks in metadata_manager.py. An
+        explicit null therefore means "unspecified" and must pick up
+        image_generation's value (unlike an explicit null max_prompts, which
+        means "no cap"). A guard simplified to only the absent-key case, or one
+        that coerces null to a concrete number, would not return 3 here.
+        """
+        metadata = {
+            "gallery_layout": {"images_per_prompt": None},
+            "image_generation": {"images_per_prompt": 3},
+        }
+
+        layout = resolve_gallery_layout(metadata, prompt_count=4)
+
+        # Explicit null must fall back to image_generation's value, not 0/1/None.
+        assert layout["images_per_prompt"] == 3
+        # max_prompts key absent from both -> no cap.
+        assert layout["max_prompts"] is None
+
 
 class TestConvenienceFunctions:
     """Tests for convenience functions."""
