@@ -151,11 +151,8 @@ class GalleryService:
         if prefix is None:
             prefix = self.get_prefix(run_dir)
 
-        prompt_files = sorted(run_dir.glob(f"{prefix}_*.txt"))
-        # Filter to only prompt files (prefix_N.txt), not other files
-        prompt_files = [f for f in prompt_files if f.stem.count('_') == 1]
-
-        return [f.read_text() for f in prompt_files]
+        from utils import get_prompts_from_run
+        return get_prompts_from_run(run_dir, prefix)
 
     def validate_file_access(self, file_path: Path, base_dir: Path) -> bool:
         """Validate file path for security (prevents path traversal).
