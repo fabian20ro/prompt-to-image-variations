@@ -56,6 +56,7 @@ class TestUnloadAllModels:
             with pytest.raises(LMStudioUnloadError) as exc_info:
                 unload_all_models()
             assert "busy" in str(exc_info.value)
+            assert "Failed to unload LM Studio models:" in str(exc_info.value)
 
     def test_raises_on_timeout_after_exhausting_retries(self):
         timeout_exc = subprocess.TimeoutExpired(cmd=["lms", "unload", "--all"], timeout=60)

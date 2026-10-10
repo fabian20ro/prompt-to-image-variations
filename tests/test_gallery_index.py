@@ -518,6 +518,29 @@ class TestGalleryIndexInteractive:
         assert "/gallery/" not in html
         assert "btn-delete" not in html
 
+    def test_build_card_html_interactive_active_shows_delete_button(self):
+        """Interactive active card must render the delete button wired to deleteGallery.
+
+        The delete affordance is deliberately active-only (the archive test above
+        asserts its absence); no existing test covers the active branch, so a
+        regression that drops or re-wires the button would still pass.
+        """
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": "image_20240101_120000_0.png",
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=True, is_archive=False)
+        assert 'class="btn-delete"' in html
+        assert 'deleteGallery("20240101_120000_xxx")' in html
+
     def test_flat_archive_prompt_counting_reflects_unique_indices(self, temp_dir):
         """Flat archive card should reflect distinct prompt indices from filenames.
 

@@ -542,3 +542,13 @@ class TestStyleClasses:
         assert len(css) > 0
         assert ".btn-delete" in css
         assert "opacity: 1;" in css
+        # .btn-delete defaults to opacity: 0 and becomes visible on hover AND on
+        # keyboard focus. The opacity: 1 assertion above is satisfied by the
+        # :hover rule alone, so it would not catch removal of the :focus-within
+        # rule — after which keyboard users tabbing into a card would never see
+        # the delete control.
+        assert ".card:focus-within" in css, (
+            "Delete button must become visible on keyboard focus, not only on "
+            "mouse hover; without the :focus-within rule keyboard users can "
+            "never see the deletion control."
+        )

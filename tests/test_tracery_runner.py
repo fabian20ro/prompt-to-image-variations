@@ -247,8 +247,8 @@ class TestGrammarEdgeCases:
     def test_empty_origin(self):
         """Test grammar with empty origin list raises error."""
         grammar = {"origin": []}
-        # Tracery raises IndexError when choosing from empty rule
-        with pytest.raises(IndexError, match="Cannot choose from an empty sequence"):
+        # Empty rules raise IndexError; stdlib wording differs on supported Python versions.
+        with pytest.raises(IndexError):
             generate_one(grammar)
 
     def test_missing_rule_reference(self):

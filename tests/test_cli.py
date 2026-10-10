@@ -225,6 +225,25 @@ class TestCliListCommand:
         assert "run_b" in captured.out
         assert "run_a" not in captured.out
 
+    def test_list_quiet_is_silent(self, temp_dir):
+        """Test --list --quiet suppresses all output, with and without runs."""
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "does_not_exist"
+            result = runner.invoke(main, ["--list", "--quiet"])
+        assert result.exit_code == 0
+        assert result.output == ""
+
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+        (prompts / "run_a" / "p2.txt").write_text("b")
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--quiet"])
+        assert result.exit_code == 0
+        assert result.output == ""
+
 
 class TestCliValidation:
     """Tests for CLI argument validation."""
