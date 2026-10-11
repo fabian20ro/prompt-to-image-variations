@@ -204,6 +204,35 @@ class TestLoadGrammarHistoryEdgeCases:
         # Verify no grammar file was consulted or created on disk
         assert not (run_dir / "empty_list_test_grammar.json").exists()
 
+    def test_valid_non_empty_list_wins_over_current_grammar(self, run_dir):
+        """A valid non-empty on-disk list must be returned as-is even when current_grammar is passed.
+
+        Precedence boundary: the on-disk history is the source of truth, and the
+        current_grammar fallback is consulted only when no usable list exists. The
+        sibling ``test_valid_empty_list_returns_as_is_without_fallback`` pins this for
+        the empty-list case (and passes no current_grammar). This pins the non-empty
+        case WITH an explicit current_grammar: a refactor that synthesizes a single
+        'current' revision whenever current_grammar is truthy — ignoring the stored
+        list — would return one fabricated entry and fail the assertions below.
+        """
+        path = _history_path(run_dir, "precedence_test")
+        on_disk = [
+            {"id": "r0", "created_at": "2024-01-01T00:00:00", "action": "initial", "grammar": "stored_0"},
+            {"id": "r1", "created_at": "2024-01-02T00:00:00", "action": "update", "grammar": "stored_1"},
+        ]
+        path.write_text(json.dumps(on_disk))
+
+        result = load_grammar_history(
+            run_dir, "precedence_test", current_grammar='{"origin": ["caller"]}'
+        )
+
+        # Disk list returned verbatim; the caller's current_grammar is never consulted.
+        assert len(result) == 2
+        assert result[0]["id"] == "r0"
+        assert result[1]["id"] == "r1"
+        assert result[0]["grammar"] == "stored_0"
+        assert result[1]["grammar"] == "stored_1"
+
     def test_returns_empty_when_json_is_dict_instead_of_list(self, run_dir):
         path = _history_path(run_dir, "dict_instead_of_list")
         path.write_text(json.dumps({"not": "a list"}))
