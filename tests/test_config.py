@@ -518,10 +518,16 @@ class TestEnvVarDocs:
         assert "(str)" in output
 
     def test_format_env_docs_empty_dict(self):
-        """Test that format_env_docs handles an empty dict gracefully."""
+        """Test that format_env_docs handles an empty dict gracefully.
+
+        For empty input the body loop emits no key lines, so the exact output is
+        the header followed by the trailing terminator. Pinning the full string
+        (including trailing newlines) makes a regression that drops or duplicates
+        the terminator fail, whereas the previous startswith check tolerated it.
+        """
         from config import format_env_docs
         output = format_env_docs({})
-        assert output.startswith("# Environment Variables\n\n")
+        assert output == "# Environment Variables\n\n\n"
 
     def test_path_config_env_docs_file_property(self):
         """Test that PathConfig.env_docs_file returns the expected generated path."""

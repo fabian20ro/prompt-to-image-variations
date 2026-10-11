@@ -117,6 +117,27 @@ def count_images_in_run(run_dir: Path, prefix: str | None = None) -> int:
     return len(list(run_dir.glob(f"{prefix}_*_*.png")))
 
 
+def prompt_files_in_run(run_dir: Path, prefix: str | None = None) -> list[Path]:
+    """Present prompt artifacts, not intended metadata count or raw-response sidecars.
+
+    Known producer prefixes use indexed filenames. Metadata-free legacy runs
+    retain opaque text filenames; listing never reads prompt contents.
+    """
+    if prefix is None and find_metadata_file(run_dir) is not None:
+        from metadata_manager import MetadataManager, MetadataError
+        try:
+            metadata = MetadataManager.load_raw(run_dir)
+            candidate = metadata.get("prefix") if isinstance(metadata, dict) else None
+            prefix = candidate if isinstance(candidate, str) else None
+        except MetadataError:
+            pass  # Incomplete metadata must not break read-only inspection.
+    pattern = re.compile(rf"^{re.escape(prefix)}_\d+\.txt$") if prefix else None
+    return sorted(path for path in run_dir.glob("*")
+                  if path.is_file() and path.suffix.lower() == ".txt"
+                  and (bool(pattern.fullmatch(path.name)) if pattern else
+                       not path.name.lower().endswith("_raw_response.txt")))
+
+
 def get_prompts_from_run(run_dir: Path, prefix: str | None = None) -> list[str]:
     """Load all prompt texts from a run directory.
 
@@ -130,13 +151,7 @@ def get_prompts_from_run(run_dir: Path, prefix: str | None = None) -> list[str]:
     if prefix is None:
         prefix = get_prefix_from_metadata(run_dir)
 
-    prompt_files = sorted(run_dir.glob(f"{prefix}_*.txt"))
-    # Filter to only prompt files (prefix_N.txt), not metadata or other files
-    import re
-    pattern = re.compile(rf"^{re.escape(prefix)}_\d+\.txt$")
-    prompt_files = [f for f in prompt_files if pattern.match(f.name)]
-
-    return [f.read_text() for f in prompt_files]
+    return [f.read_text() for f in prompt_files_in_run(run_dir, prefix)]
 
 
 def _get_prompt_text(run_dir: Path, prefix: str, prompt_idx: int) -> str:

@@ -26,12 +26,20 @@
 
 - Prompt files: `{prefix}_{n}.txt`
 - Images: `{prefix}_{prompt_idx}_{image_idx}.png`
-- Metadata: `{prefix}_metadata.json`
+- Metadata: `{prefix}.metaprompt.json`
 - Grammar: `{prefix}_grammar.json`
 - Optional raw LLM response: `{prefix}_raw_response.txt`
 - Gallery: `{prefix}_gallery.html`
 
 ## Important Couplings
+
+### ADR — present prompt artifacts (2026-10-11)
+
+`utils.prompt_files_in_run` owns prompt-file identity for CLI inspection and
+prompt/gallery readers. Known prefixes use `{prefix}_{n}.txt`, including prefixes
+with underscores; raw-response sidecars are never prompts. Metadata-free legacy
+lists retain opaque text filenames. Count present artifacts, not metadata's
+intended count. Image-format handling remains unchanged; no files are rewritten.
 
 - Metadata drives most downstream behavior (prefix, image settings, counts).
 - Gallery generation depends on prompt/image naming conventions.
