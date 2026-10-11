@@ -197,6 +197,25 @@ async def test_heartbeat_exit_returns_false():
         "Heartbeat.__exit__ must return False so that exceptions are not suppressed"
 
 
+def test_enter_returns_same_instance():
+    """Test that the 'with ... as' binding is the same instance whose thread was started.
+
+    The context manager protocol requires __enter__ to return the object the
+    binding introspects. A refactored __enter__ that returned a delegating
+    proxy or a duplicate would still pass the duck-typed checks in the other
+    tests while silently breaking caller-side introspection such as early
+    stop via hb._stop_event.set().
+    """
+
+    with patch('src.server.worker_subprocess.emit_progress'):
+        hb = Heartbeat(message="test", interval=1.0)
+        with hb as entered:
+            assert entered is hb, (
+                "__enter__ must return the Heartbeat instance itself so that "
+                "the 'with ... as' binding refers to the live resource"
+            )
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__])
