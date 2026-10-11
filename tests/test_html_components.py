@@ -162,6 +162,29 @@ class TestLogPanel:
             "assignment on lines containing both keywords."
         )
 
+    def test_js_trims_oldest_lines_when_over_max(self):
+        """appendLog must remove the oldest lines once the panel holds more than
+        MAX_LOG_LINES entries.
+
+        The existing JS test only asserts that the MAX_LOG_LINES constant is
+        present in the source; a regression that keeps the constant while
+        deleting the trim loop would pass it, yet log-content would then grow
+        without bound over a long session — each appended line is a real DOM
+        node, and unbounded growth eventually makes the gallery sluggish. The
+        implemented trim is a while loop bounded by the cap that removes the
+        first child, keeping the DOM flat; it is observable in the produced JS.
+        """
+        js = LogPanel.js()
+        assert "removeChild" in js, (
+            "appendLog must remove the oldest log line when the count exceeds "
+            "MAX_LOG_LINES; otherwise the DOM grows without bound over long "
+            "generation sessions."
+        )
+        assert "children.length > MAX_LOG_LINES" in js, (
+            "The trim loop must be bounded by MAX_LOG_LINES so only the oldest "
+            "lines beyond the cap are removed."
+        )
+
 
 class TestQueueStatusBar:
     """Tests for QueueStatusBar component."""
