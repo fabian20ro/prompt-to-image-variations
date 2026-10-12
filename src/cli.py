@@ -11,7 +11,7 @@ from config import settings, paths
 from grammar_generator import generate_grammar
 from image_enhancer import enhance_image, collect_images
 from pipeline import PipelineExecutor
-from utils import check_lm_studio
+from utils import check_lm_studio, prompt_files_in_run
 
 
 def _read_prompt_from_stdin(prompt: str | None) -> str | None:
@@ -51,15 +51,13 @@ def list_generated(as_json: bool = False, quiet: bool = False) -> None:
     if paths.prompts_dir.exists():
         for d in sorted(paths.prompts_dir.iterdir()):
             if d.is_dir():
-                prompt_count = 0
+                prompt_count = len(prompt_files_in_run(d))
                 image_count = 0
                 for f in d.iterdir():
                     if f.is_file():
                         suffix = f.suffix.lower()
                         if suffix in image_extensions:
                             image_count += 1
-                        elif suffix == ".txt":
-                            prompt_count += 1
                 runs.append({
                     "run_id": d.name,
                     "prompt_count": prompt_count,

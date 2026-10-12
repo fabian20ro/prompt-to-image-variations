@@ -136,6 +136,30 @@ class TestCliCleanCommand:
 class TestCliListCommand:
     """Tests for --list flag (read-only inspection of generated runs)."""
 
+    @pytest.mark.parametrize("arguments", [["--list"], ["--list", "--json"]])
+    def test_list_counts_generated_prompts_not_pipeline_sidecars(self, temp_dir, arguments):
+        prompts = temp_dir / "prompts"
+        run = prompts / "run"
+        run.mkdir(parents=True)
+        # Literal producer artifacts; metadata count is intended, not present.
+        for name in ("camera_study_0.txt", "camera_study_1.txt",
+                     "camera_study_raw_response.txt", "camera_study_0_0.png",
+                     "camera_study_grammar.json", "camera_study_gallery.html"):
+            (run / name).write_text("fixture")
+        (run / "camera_study.metaprompt.json").write_text(json.dumps(
+            {"prefix": "camera_study", "count": 99}))
+        before = {path.name: path.read_bytes() for path in run.iterdir()}
+        with patch("cli.paths") as configured:
+            configured.prompts_dir = prompts
+            result = CliRunner().invoke(main, arguments)
+        assert result.exit_code == 0
+        if "--json" in arguments:
+            assert json.loads(result.output) == [
+                {"run_id": "run", "prompt_count": 2, "image_count": 1}]
+        else:
+            assert result.output == "run: 2 prompts, 1 image\n"
+        assert {path.name: path.read_bytes() for path in run.iterdir()} == before
+
     def test_list_nonexistent_dir_no_runs(self, temp_dir):
         """Test --list with a nonexistent prompts directory prints 'No runs found.' and exits 0."""
         runner = CliRunner()
@@ -144,6 +168,22 @@ class TestCliListCommand:
             result = runner.invoke(main, ["--list"])
         assert result.exit_code == 0
         assert "No runs found." in result.output
+
+    @pytest.mark.parametrize("metadata", [None, "{}", "incomplete JSON", "null", '{"prefix": []}'])
+    def test_list_partial_run_excludes_raw_response_without_losing_legacy_text(self, temp_dir, metadata):
+        run = temp_dir / "partial"
+        run.mkdir()
+        (run / "p1.txt").write_text("prompt")
+        (run / "image_raw_response.txt").write_text("raw")
+        (run / "image_1.txt").mkdir()
+        if metadata is not None:
+            (run / "image.metaprompt.json").write_text(metadata)
+        with patch("cli.paths") as configured:
+            configured.prompts_dir = temp_dir
+            result = CliRunner().invoke(main, ["--list", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output) == [
+            {"run_id": "partial", "prompt_count": 1, "image_count": 0}]
 
     def test_list_empty_dir_no_runs(self, temp_dir):
         """Test --list with an empty prompts directory prints 'No runs found.' and exits 0."""

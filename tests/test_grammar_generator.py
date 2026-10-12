@@ -297,6 +297,39 @@ class TestGrammarTools(unittest.TestCase):
         assert mock_post.call_count == 2
         mock_sleep.assert_called_once_with(2.0)
 
+    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.requests.get")
+    @patch("grammar_generator.requests.post")
+    @patch("grammar_generator.cache_grammar")
+    @patch("grammar_generator.get_cached_grammar", return_value=None)
+    def test_generate_grammar_rejects_invalid_json_before_caching(
+        self, mock_get_cached, mock_cache, mock_post, mock_get, _mock_prompt
+    ):
+        # When the LM returns message content that is not JSON, generate_grammar
+        # must fail fast with a ValueError and must never cache the invalid
+        # output — caching would poison lookups on every subsequent prompt.
+        mock_get.return_value.json.return_value = {
+            "models": [
+                {
+                    "key": "google/gemma-4-26b-a4b-qat",
+                    "loaded_instances": [{"id": "google/gemma-4-26b-a4b-qat"}],
+                }
+            ]
+        }
+        mock_post.return_value.json.return_value = {
+            "output": [{"type": "message", "content": "I can't produce a grammar."}]
+        }
+
+        with self.assertRaisesRegex(ValueError, "invalid JSON grammar"):
+            generate_grammar(
+                "a cat",
+                base_url="http://localhost:1234/v1",
+                use_cache=True,
+            )
+
+        mock_cache.assert_not_called()
+        mock_get_cached.assert_called_once()
+
 
 class TestEmptyPromptGuard(unittest.TestCase):
     """Tests for rejecting empty/whitespace-only prompts at the entry point."""

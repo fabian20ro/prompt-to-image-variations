@@ -348,3 +348,11 @@ production HTTP calls inspected use requests, so application exploitability is n
 No broad dependency refresh or behavioral changes. Discarded unrelated uv resolver formatting.
 **Verification:** Linux Ruff and1017 pytest cases passed; final minimal lock rechecked separately.
 **Promoted to Lessons Learned:** No
+
+### [2026-10-11] Raw-response sidecar is not a generated prompt
+
+**Context:** Independent CLI artifact-count acceptance exposed a raw-response sidecar counted as a prompt.
+**What happened:** Producer-shaped text/JSON fixture: two indexed prompts, raw response, one PNG and intended metadata count99. RED:3 prompts; GREEN:2/1. CLI and gallery share the existing utils artifact identity owner; custom prefixes and metadata-free/partial/corrupt runs preserved. Applied after natural cron commit e3299eb under the native execution lock and host integration fence.
+**Verification:** Isolated locked Python3.10 and CI3.14 suites; no LM call, artifact deletion or completed-proposal rewrite.
+**Insight:** Count present producer artifacts, not all text files or intended metadata counts.
+**Promoted to Lessons Learned:** No

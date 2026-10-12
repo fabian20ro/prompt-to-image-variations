@@ -809,6 +809,28 @@ class TestCreateGallery:
         # Escaped form should appear as text, proving html.escape was applied.
         assert "&lt;img" in content or escaped in content
 
+    def test_create_gallery_escapes_user_prompt_in_header(self, temp_dir):
+        """create_gallery must HTML-escape the user prompt displayed in the header paragraph."""
+        import html as html_mod
+
+        from gallery import create_gallery
+
+        raw = '<img src="x" onerror="alert(1)">&"q"'
+        escaped = html_mod.escape(raw)
+
+        gallery = create_gallery(
+            output_dir=temp_dir,
+            prefix="up",
+            prompts=["p1"],
+            images_per_prompt=1,
+            user_prompt=raw,
+        )
+
+        content = gallery.read_text()
+        # The header must show the escaped form — never raw markup that would become live HTML.
+        assert f'<p class="original-prompt">{escaped}</p>' in content
+        assert '<img src="x"' not in content
+
     def test_create_gallery_interactive_embeds_grammar_history_in_js(self, temp_dir):
         """Interactive gallery must embed the provided grammar history in its JS."""
         history = [

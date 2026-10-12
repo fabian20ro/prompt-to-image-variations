@@ -436,6 +436,13 @@ class TestGalleryService:
 
         assert prompts == ["valid"]
 
+    def test_load_prompts_accepts_producer_prefix_with_underscores(self, temp_dir):
+        (temp_dir / "camera_study_0.txt").write_text("first")
+        (temp_dir / "camera_study_1.txt").write_text("second")
+        (temp_dir / "camera_study_raw_response.txt").write_text("not a prompt")
+        service = GalleryService(temp_dir, temp_dir)
+        assert service.load_prompts(temp_dir, prefix="camera_study") == ["first", "second"]
+
     def test_get_metadata_file_prefers_metaprompt(self, temp_dir):
         """Test get_metadata_file prefers *.metaprompt.json over *_metadata.json."""
         run_dir = temp_dir / "run"

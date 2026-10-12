@@ -318,6 +318,31 @@ class TestGalleryIndexInteractive:
         expected_visible = f'{"x" * 100}...'
         assert expected_visible.encode() in html.encode("utf-8") or expected_visible in html
 
+    def test_build_card_html_escapes_html_in_user_prompt(self):
+        """Card must HTML-escape user_prompt; raw < and & must not reach the page.
+
+        Every existing card test uses a prompt free of HTML-special characters,
+        so a regression that removed the html.escape() call (injection of raw
+        markup into the browser-facing index) would still pass them all. This
+        pins the escaped form in the rendered card and asserts the raw form is absent.
+        """
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "a < b & c",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": "prompts/20240101_120000_xxx/image.png",
+        }
+        html = _build_card_html(run, interactive=False)
+
+        assert "a &lt; b &amp; c" in html
+        assert "a < b & c" not in html
+
     def test_build_flat_archive_card_no_thumbnail_fallback(self):
         """_build_flat_archive_card_html should show no-thumbnail when no first_image."""
         from gallery_index import _build_flat_archive_card_html

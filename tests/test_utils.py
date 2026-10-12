@@ -14,6 +14,7 @@ from utils import (
     get_prefix_from_metadata,
     count_images_in_run,
     get_prompts_from_run,
+    prompt_files_in_run,
     _get_prompt_text,
     _truncate_for_png,
     backup_run,
@@ -145,6 +146,17 @@ class TestUtils:
         prompts = get_prompts_from_run(temp_dir)
         assert prompts == []
         assert len(prompts) == 0
+
+    def test_prompt_files_in_run_legacy_excludes_raw_response_sidecars(self, temp_dir):
+        """Metadata-free runs list opaque .txt files sorted, never raw-response sidecars."""
+        (temp_dir / "a_legacy.txt").write_text("first legacy prompt")
+        (temp_dir / "b_legacy.txt").write_text("second legacy prompt")
+        (temp_dir / "a_raw_response.txt").write_text('{"model": "sidecar"}')
+        (temp_dir / "z_RAW_RESPONSE.TXT").write_text('{"model": "sidecar"}')
+
+        files = prompt_files_in_run(temp_dir)
+
+        assert files == [temp_dir / "a_legacy.txt", temp_dir / "b_legacy.txt"]
 
     def test_backup_run(self, temp_dir):
         """Test backing up a run directory to flat files with EXIF metadata."""
