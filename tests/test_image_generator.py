@@ -214,7 +214,8 @@ def test_generate_image_random_seed_and_tiling(mock_unload, mock_get_model, temp
         generate_image("test", temp_dir / "image.png", tiled_vae=True)
     mock_get_model.assert_called_once_with(True)
     mock_unload.assert_called_once_with()
-    randint.assert_called_once()
+    # seed=None must draw from the full 32-bit unsigned range.
+    randint.assert_called_once_with(0, 2**32 - 1)
     assert mock_get_model.return_value.generate_image.call_args.kwargs["seed"] == 123
 
 
