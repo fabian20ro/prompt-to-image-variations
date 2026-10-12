@@ -58,6 +58,30 @@ class TestUnloadAllModels:
             assert "busy" in str(exc_info.value)
             assert "Failed to unload LM Studio models:" in str(exc_info.value)
 
+    def test_raised_detail_reflects_final_attempt(self):
+        """Each failed attempt overwrites the pending error, so the raised
+        detail must come from the final attempt, not earlier ones."""
+        results = [
+            MagicMock(returncode=1, stderr="first failure detail"),
+            MagicMock(returncode=1, stderr="second failure detail"),
+            MagicMock(returncode=1, stderr="final failure detail"),
+        ]
+
+        call_count = [0]
+        def side_effect(*args, **kwargs):
+            result = results[call_count[0]]
+            call_count[0] += 1
+            return result
+
+        with patch("lm_studio.shutil.which", return_value="/usr/bin/lms"), \
+             patch("lm_studio.subprocess.run", side_effect=side_effect), \
+             patch("lm_studio.time.sleep"):
+            with pytest.raises(LMStudioUnloadError) as exc_info:
+                unload_all_models()
+            message = str(exc_info.value)
+            assert "final failure detail" in message
+            assert "first failure detail" not in message
+
     def test_raises_on_timeout_after_exhausting_retries(self):
         timeout_exc = subprocess.TimeoutExpired(cmd=["lms", "unload", "--all"], timeout=60)
 
