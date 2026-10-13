@@ -210,6 +210,14 @@ class TestRunTracery:
         results = run_tracery("{invalid", count=0)
         assert results == []
 
+    def test_run_tracery_invalid_json_negative_count_returns_empty(self):
+        """Test that a negative count short-circuits before parsing invalid JSON."""
+        # The guard is `count <= 0` (not `count == 0`): a negative count with invalid
+        # JSON must return [] without raising. A `count == 0` guard would fall through
+        # to parse_grammar and raise TraceryError instead of returning [].
+        results = run_tracery("{invalid", count=-1)
+        assert results == []
+
     def test_parse_grammar_non_dict_json(self):
         """Test that parse_grammar passes through non-dict JSON (no validation)."""
         # parse_grammar only calls json.loads — it does not validate the result is a dict.
