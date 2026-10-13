@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from src.grammar_generator import get_system_prompt, hash_prompt, get_cached_grammar, cache_grammar, get_cached_raw_response
 import json
 
@@ -12,6 +13,29 @@ def test_get_system_prompt_default(tmp_path):
     
     # Then
     assert prompt == "generic prompt"
+
+
+def test_get_system_prompt_default_uses_configured_templates_dir(tmp_path, monkeypatch):
+    """The no-argument default must read from the configured templates directory.
+
+    The template content tests exercise the no-argument call against the real
+    project template, which cannot distinguish a default that ignores
+    ``paths.templates_dir`` (e.g. hardcoded to a CWD-relative path) from the
+    configured one when both resolve to the same file. Pointing the configured
+    directory at a temp location with distinct content proves the config lookup
+    is actually honored.
+    """
+    configured = tmp_path / "configured_templates"
+    configured.mkdir()
+    (configured / "system_prompt.txt").write_text("configured prompt")
+
+    monkeypatch.setattr(
+        "src.grammar_generator.paths",
+        SimpleNamespace(templates_dir=configured),
+    )
+
+    assert get_system_prompt() == "configured prompt"
+
 
 def test_project_system_prompt_is_ernie_specific():
     prompt = get_system_prompt()
