@@ -41,6 +41,34 @@ def test_run_from_grammar_no_meta(mock_grammar_file):
             assert result.run_id == "test_id"
 
 
+def test_run_from_grammar_source_in_metadata(mock_grammar_file, tmp_path):
+    """run_from_grammar must persist source='from_grammar' in the metadata file.
+
+    run_from_grammar_text defaults source to 'from_grammar_text'; the
+    run_from_grammar seam intentionally overrides it so downstream consumers
+    (gallery rendering) can tell a grammar-file re-import from an inline text
+    import. If the override is dropped the run still succeeds, but the
+    persisted provenance is mislabeled — no existing assertion catches that.
+    """
+    output_dir = tmp_path / "output"
+
+    with patch("pipeline.create_gallery"), \
+         patch("pipeline.generate_master_index"), \
+         patch("pipeline.append_grammar_revision"), \
+         patch("pipeline.run_tracery", return_value=["a dragon, expanded"]):
+        result = PipelineExecutor().run_from_grammar(
+            mock_grammar_file,
+            count=1,
+            output_dir=output_dir,
+        )
+
+    assert result.success is True
+    assert result.run_id == output_dir.name
+    metadata = json.loads((output_dir / "image.metaprompt.json").read_text())
+    assert metadata["source"] == "from_grammar"
+    assert metadata["user_prompt"] == "a dragon"
+
+
 def test_run_from_grammar_text_invalid_grammar_returns_error(tmp_path):
     """Invalid Tracery grammar should produce a failed PipelineResult with an error message."""
     executor = PipelineExecutor()
