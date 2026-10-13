@@ -268,6 +268,47 @@ class TestEnhanceImage:
 
         assert output_path.parent.exists()
 
+    @patch("image_enhancer._get_enhancer")
+    @patch("image_enhancer.unload_all_models")
+    def test_enhance_image_forwards_tiled_vae(self, _mock_unload, mock_get_enhancer, temp_dir):
+        """The tiled_vae request is threaded to _get_enhancer to select the right enhancer."""
+        img = Image.new("RGB", (10, 10))
+        image_path = temp_dir / "test.png"
+        img.save(image_path)
+        output_path = temp_dir / "enhanced.png"
+
+        mock_enhancer = MagicMock()
+        mock_enhancer.generate_image.return_value = MagicMock()
+        mock_get_enhancer.return_value = mock_enhancer
+
+        with patch.dict(sys.modules, {
+            "mflux.utils.scale_factor": MagicMock(),
+        }):
+            enhance_image(image_path=image_path, output_path=output_path, tiled_vae=True)
+
+        # Production calls _get_enhancer positionally: _get_enhancer(tiled_vae)
+        mock_get_enhancer.assert_called_once_with(True)
+
+    @patch("image_enhancer._get_enhancer")
+    @patch("image_enhancer.unload_all_models")
+    def test_enhance_image_default_tiled_vae_false(self, _mock_unload, mock_get_enhancer, temp_dir):
+        """By default (no tiled_vae arg) the non-tiled enhancer is requested."""
+        img = Image.new("RGB", (10, 10))
+        image_path = temp_dir / "test.png"
+        img.save(image_path)
+        output_path = temp_dir / "enhanced.png"
+
+        mock_enhancer = MagicMock()
+        mock_enhancer.generate_image.return_value = MagicMock()
+        mock_get_enhancer.return_value = mock_enhancer
+
+        with patch.dict(sys.modules, {
+            "mflux.utils.scale_factor": MagicMock(),
+        }):
+            enhance_image(image_path=image_path, output_path=output_path)
+
+        mock_get_enhancer.assert_called_once_with(False)
+
 
 class TestCollectImages:
     """Tests for image collection from various sources."""

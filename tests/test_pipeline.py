@@ -86,6 +86,20 @@ class TestImageGenerationConfig:
         assert "seed" not in result  # None by default
         assert "max_prompts" not in result  # None by default
 
+    def test_to_dict_includes_non_none_optionals(self):
+        """Non-None optionals must be serialized into the dict with their values.
+
+        Complements test_to_dict_excludes_none_optionals: it exercises the
+        *inclusion* branch of the ``if self.seed is not None`` condition.
+        A regression that typo'd the key, coerced the type, or stored the
+        wrong value in that branch would still pass the None-exclusion tests
+        but is caught here.
+        """
+        config = ImageGenerationConfig(enabled=True, width=1024, height=768, seed=7, max_prompts=2)
+        result = config.to_dict()
+        assert result["seed"] == 7
+        assert result["max_prompts"] == 2
+
 
 class TestEnhancementConfig:
     """Tests for EnhancementConfig dataclass."""

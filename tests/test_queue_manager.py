@@ -16,6 +16,32 @@ class TestQueueManager:
         assert state.current_task is None
         assert len(state.pending) == 0
 
+    def test_load_corrupted_queue_resets_to_empty(self, queue_path):
+        """A corrupted queue file must reset to a fresh empty state instead of raising."""
+        # Truncated JSON: the JSONDecodeError branch of _load_state.
+        queue_path.write_text('{"version": 1, "pending": ')
+        qm = QueueManager(queue_path)
+        state = qm.get_state()
+        assert state.version == 1
+        assert state.current_task is None
+        assert len(state.pending) == 0
+        assert len(state.completed) == 0
+
+        # Valid JSON with an invalid schema: the generic Exception branch.
+        queue_path.write_text('{"version": "not-an-int", "pending": "not-a-list"}')
+        qm2 = QueueManager(queue_path)
+        state2 = qm2.get_state()
+        assert state2.version == 1
+        assert state2.current_task is None
+        assert len(state2.pending) == 0
+        assert len(state2.completed) == 0
+
+        # The manager remains fully usable after the reset.
+        task = qm2.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test"})
+        state3 = qm2.get_state()
+        assert len(state3.pending) == 1
+        assert state3.pending[0].id == task.id
+
     def test_add_task(self, queue_path):
         """Test adding a task to the queue."""
         qm = QueueManager(queue_path)

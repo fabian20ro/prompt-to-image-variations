@@ -716,6 +716,22 @@ class TestGenerateFromGrammarRequestValidation:
         with pytest.raises(ValidationError):
             GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', bogus_field="should fail")
 
+    def test_generate_from_grammar_request_prefix_pattern(self):
+        """Test that prefix must match allowed pattern on GenerateFromGrammarRequest."""
+        from pydantic import ValidationError
+
+        # Valid prefixes (alphanumeric, hyphens, underscores)
+        GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="image")
+        GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="my-prefix")
+        GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="prefix_123")
+
+        # Invalid prefixes (spaces, dots)
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="prefix with spaces")
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="prefix.with.dots")
+
 
 class TestGenerateImageRequestExtraFields:
     """Tests for GenerateImageRequest extra field handling (no forbid config)."""

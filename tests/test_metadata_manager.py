@@ -200,6 +200,14 @@ class TestMetadataManager:
         assert result.name == "custom.metaprompt.json"
         saved = json.loads(result.read_text())
         assert saved["count"] == 20
+        # Unset optional fields must stay off-disk: to_dict only emits
+        # optional keys when truthy, so a minimal run serializes to
+        # exactly the six base keys. A refactor that emits them
+        # unconditionally would add null/empty keys to every minimal file.
+        assert set(saved.keys()) == {
+            "prefix", "count", "user_prompt", "model", "created_at",
+            "grammar_cached",
+        }
 
     def test_save_creates_directory(self, temp_dir):
         """Test that save creates directory if needed."""

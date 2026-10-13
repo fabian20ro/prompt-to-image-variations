@@ -317,6 +317,16 @@ class TestGenerateAllEndpoint:
         assert response.status_code == 404
 
 
+class TestEnhanceAllEndpoint:
+    """Tests for POST /api/gallery/{run_id}/enhance-all."""
+
+    def test_enhance_all_gallery_not_found(self, client):
+        """Test 404 for enhancing a missing gallery."""
+        response = client.post("/api/gallery/nonexistent/enhance-all")
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+
 class TestRegenerateEndpoint:
     """Tests for POST /api/gallery/{run_id}/regenerate."""
 
