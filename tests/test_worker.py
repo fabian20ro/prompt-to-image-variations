@@ -580,6 +580,49 @@ class TestWorkerExecuteTask:
         )
         worker.queue_manager.complete_task.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_run_task_inner_handles_cancellation(self, worker):
+        """Test that cancelling an in-flight task terminates the subprocess, marks the
+        task cancelled (never failed/completed), re-raises, and clears _current_process.
+
+        Distinguishes a refactor that treats a shutdown cancel as a failure
+        (fail_task instead of cancel_task) or drops the `raise` so the run loop
+        swallows the cancellation and keeps running.
+        """
+        task = MockTask(task_id="cancel-test-id")
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[b""],
+            stderr_lines=[b""],
+        )
+        # The post-read-loop wait() is the cancellation point; the handler's own
+        # (graceful) wait() must return normally.
+        wait_calls = [0]
+
+        async def mock_wait():
+            wait_calls[0] += 1
+            if wait_calls[0] == 1:
+                await asyncio.sleep(0)  # drain the concurrent stderr reader
+                raise asyncio.CancelledError()
+            return 0
+
+        mock_process.wait = mock_wait
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            with pytest.raises(asyncio.CancelledError):
+                await worker._run_task_inner(task)
+
+        # Subprocess terminated gracefully, never hard-killed.
+        mock_process.terminate.assert_called_once()
+        mock_process.kill.assert_not_called()
+        # Cancelled with the task's own id — distinct from kill_current's get_state path.
+        worker.queue_manager.cancel_task.assert_called_once_with(task.id)
+        # A cancellation is neither a completion nor a failure.
+        worker.queue_manager.complete_task.assert_not_called()
+        worker.queue_manager.fail_task.assert_not_called()
+        # Stale process reference cleared so a later kill_current() is a no-op.
+        assert worker._current_process is None
+
 
 class TestWorkerRun:
     """Tests for Worker.run() main loop."""
