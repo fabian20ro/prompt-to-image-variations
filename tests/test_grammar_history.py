@@ -52,6 +52,14 @@ class TestLoadGrammarHistory:
         assert result[0]["id"] == "initial"
         assert result[0]["action"] == "initial"
         assert result[0]["grammar"] == grammar_text
+        # The synthetic fallback entry must carry a parseable ISO-8601 timestamp:
+        # the gallery UI renders new Date(entry.created_at) (src/gallery.py) and
+        # the GET /api/gallery/{run_id}/grammar/history endpoint returns entries
+        # verbatim (src/server/routes.py), so a missing or malformed created_at
+        # would surface as "Invalid Date" to the user.
+        created_at = result[0]["created_at"]
+        assert isinstance(created_at, str)
+        datetime.fromisoformat(created_at)
 
     def test_falls_back_to_current_grammar_on_corrupted_json(self, run_dir):
         path = _history_path(run_dir, "test")
