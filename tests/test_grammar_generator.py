@@ -297,6 +297,27 @@ class TestGrammarTools(unittest.TestCase):
         assert mock_post.call_count == 2
         mock_sleep.assert_called_once_with(2.0)
 
+    @patch("grammar_generator.time.sleep")
+    @patch("grammar_generator.requests.get")
+    @patch("grammar_generator.requests.post")
+    def test_ensure_lm_model_loaded_raises_when_model_not_installed(
+        self, mock_post, mock_get, mock_sleep
+    ):
+        # If the pinned model is absent from /models, the helper must fail
+        # fast with an actionable "not installed" error and never attempt
+        # a /models/load POST for a model LM Studio does not have.
+        mock_get.return_value.json.return_value = {
+            "models": [
+                {"key": "other/model-not-the-pinned-one", "loaded_instances": []}
+            ]
+        }
+
+        with self.assertRaisesRegex(ValueError, "not installed"):
+            ensure_lm_model_loaded("http://localhost:1234/v1")
+
+        mock_post.assert_not_called()
+        mock_sleep.assert_not_called()
+
     @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
     @patch("grammar_generator.requests.get")
     @patch("grammar_generator.requests.post")
