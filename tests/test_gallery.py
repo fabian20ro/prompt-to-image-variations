@@ -219,6 +219,8 @@ const vm = require('node:vm'), assert = require('node:assert/strict');
         assert 'id="img-steps"' not in content
         assert 'id="img-model"' not in content
         assert 'value="7"' in content
+        assert 'id="img-enhance" name="enhance" checked>' in content
+        assert 'name="enhance_softness" value="0.3"' in content
         assert "Imported grammar run" in content
         assert content.count('data-prompt-idx="2"') == 0
 
