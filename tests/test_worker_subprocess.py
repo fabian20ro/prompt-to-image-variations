@@ -938,6 +938,7 @@ class TestRunDeleteGallery:
             result = json.loads(lines[-1])
             assert result["success"] is True
             assert result["data"]["deleted"] is True
+            mock_del.assert_called_once_with(gallery_dir, prompts_dir)
             mock_gen.assert_called_once()
         finally:
             shutil.rmtree(prompts_dir, ignore_errors=True)

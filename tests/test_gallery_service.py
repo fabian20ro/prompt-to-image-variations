@@ -214,6 +214,24 @@ class TestGalleryService:
         assert '"origin"' in result
         assert '"subject"' in result
 
+    def test_load_grammar_malformed_file_returns_raw_content(self, temp_dir):
+        """Test load_grammar returns file content as-is without parsing.
+
+        load_grammar is a raw read (docstring: "Grammar JSON string or None if
+        not found"); JSON validation is the route layer's job (see
+        TestUpdateGrammar::test_update_grammar_invalid_json in test_routes.py,
+        which expects a 400 from the endpoint, not from the service).
+        A service-side json.loads would raise on a corrupted-but-existing
+        file and turn a readable 200 response into a 500.
+        """
+        malformed = '{"origin": ["#subject#"], "subject": ["cat"'
+        (temp_dir / "test_grammar.json").write_text(malformed)
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.load_grammar(temp_dir, "test")
+
+        assert result == malformed
+
     def test_get_grammar_file_explicit_prefix(self, temp_dir):
         """Test get_grammar_file with explicit prefix returns correct path."""
         run_dir = temp_dir / "run"

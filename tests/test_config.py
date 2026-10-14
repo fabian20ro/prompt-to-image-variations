@@ -64,6 +64,20 @@ class TestConfig:
             settings = Settings.from_env()
             assert str(settings.image_generation.model_path) == custom_path
 
+    def test_model_path_unset_falls_back_to_cross_platform_default(self):
+        """Test that from_env() auto-detects the model path when the env key is unset.
+
+        Mirrors test_env_override_uses_default_function (key set -> override):
+        when PROMPT_GEN_ERNIE_MODEL_PATH is absent, from_env must fall back to the
+        cross-platform _default_model_path() — the documented default — instead of
+        raising or producing a blank path.
+        """
+        from config import _default_model_path
+
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings.from_env()
+            assert settings.image_generation.model_path == _default_model_path()
+
     def test_default_model_path_darwin_branch(self, tmp_path):
         """Test that _default_model_path uses the macOS Library/Caches location on Darwin.
 

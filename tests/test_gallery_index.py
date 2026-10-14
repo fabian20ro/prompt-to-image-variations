@@ -122,6 +122,36 @@ class TestGalleryIndexInteractive:
         assert "archive-badge" in content
         assert "Pre-Regen" in content  # Badge for pre_regenerate
 
+    def test_index_orders_active_runs_newest_first(self, temp_dir):
+        """Active runs render newest-first in the index document.
+
+        generate_master_index sorts active_runs by timestamp descending
+        ('# Sort by timestamp (newest first)'), but every existing run test
+        asserts presence, never document order — so a regression that removed
+        or reversed the sort would pass the whole current suite.
+        """
+        older = temp_dir / "prompts" / "20240101_120000_old"
+        older.mkdir(parents=True)
+        (older / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "OLDEST RUN PROMPT",
+        }))
+        (older / "test_gallery.html").write_text("<html></html>")
+
+        newer = temp_dir / "prompts" / "20240102_090000_new"
+        newer.mkdir(parents=True)
+        (newer / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "NEWEST RUN PROMPT",
+        }))
+        (newer / "test_gallery.html").write_text("<html></html>")
+
+        content = generate_master_index(temp_dir).read_text()
+
+        assert content.index("NEWEST RUN PROMPT") < content.index("OLDEST RUN PROMPT")
+
     def test_index_flat_archive_prefers_display_title(self, temp_dir):
         """Flat archive cards should prefer display_title over raw user_prompt."""
         saved_dir = temp_dir / "saved"
