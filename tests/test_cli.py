@@ -155,7 +155,8 @@ class TestCliListCommand:
         assert result.exit_code == 0
         if "--json" in arguments:
             assert json.loads(result.output) == [
-                {"run_id": "run", "prompt_count": 2, "image_count": 1}]
+                {"run_id": "run", "prompt_count": 2, "image_count": 1,
+                 "user_prompt": None}]
         else:
             assert result.output == "run: 2 prompts, 1 image\n"
         assert {path.name: path.read_bytes() for path in run.iterdir()} == before
@@ -183,7 +184,8 @@ class TestCliListCommand:
             result = CliRunner().invoke(main, ["--list", "--json"])
         assert result.exit_code == 0
         assert json.loads(result.output) == [
-            {"run_id": "partial", "prompt_count": 1, "image_count": 0}]
+            {"run_id": "partial", "prompt_count": 1, "image_count": 0,
+             "user_prompt": None}]
 
     def test_list_empty_dir_no_runs(self, temp_dir):
         """Test --list with an empty prompts directory prints 'No runs found.' and exits 0."""
@@ -299,7 +301,8 @@ class TestCliListCommand:
         assert result.exit_code == 0
         parsed = json.loads(result.output)
         assert isinstance(parsed, list)
-        assert {"run_id": "run_a", "prompt_count": 2, "image_count": 0} in parsed
+        assert {"run_id": "run_a", "prompt_count": 2, "image_count": 0,
+                "user_prompt": None} in parsed
         for entry in parsed:
             assert isinstance(entry["run_id"], str)
             assert isinstance(entry["prompt_count"], int)
@@ -352,6 +355,75 @@ class TestCliListCommand:
             result = runner.invoke(main, ["--list", "--quiet"])
         assert result.exit_code == 0
         assert result.output == ""
+
+    def test_list_json_includes_user_prompt(self, temp_dir):
+        """Test --list --json surfaces the original user prompt from metaprompt.json."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run_sunset"
+        run.mkdir(parents=True)
+        (run / "p1.txt").write_text("a")
+        (run / "image.metaprompt.json").write_text(json.dumps(
+            {"prefix": "image", "count": 1, "user_prompt": "sunset beach"}))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        entry = next(e for e in parsed if e["run_id"] == "run_sunset")
+        assert entry["user_prompt"] == "sunset beach"
+
+    def test_list_json_null_prompt_without_metadata(self, temp_dir):
+        """Test a run with no metadata file lists with user_prompt null and exits 0."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        entry = next(e for e in parsed if e["run_id"] == "run_a")
+        assert entry["user_prompt"] is None
+
+    def test_list_human_truncates_long_user_prompt(self, temp_dir):
+        """Test human --list truncates a long user prompt at 60 chars with an ellipsis."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run_long"
+        run.mkdir(parents=True)
+        (run / "image_1.txt").write_text("a")
+        (run / "image.metaprompt.json").write_text(json.dumps(
+            {"prefix": "image", "count": 1, "user_prompt": "x" * 80}))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == f"run_long: 1 prompts ({'x' * 60}...)\n"
+
+    def test_list_human_empty_user_prompt_unchanged(self, temp_dir):
+        """Test human --list output is byte-identical when user_prompt is empty."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run_empty"
+        run.mkdir(parents=True)
+        (run / "image_1.txt").write_text("a")
+        (run / "image.metaprompt.json").write_text(json.dumps(
+            {"prefix": "image", "count": 1, "user_prompt": ""}))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == "run_empty: 1 prompts\n"
 
 
 class TestCliValidation:

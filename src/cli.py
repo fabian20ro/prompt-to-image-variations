@@ -11,6 +11,7 @@ from config import settings, paths
 from grammar_generator import generate_grammar
 from image_enhancer import enhance_image, collect_images
 from pipeline import PipelineExecutor
+from metadata_manager import MetadataError, MetadataManager
 from utils import check_lm_studio, prompt_files_in_run
 
 
@@ -44,8 +45,24 @@ def clean_generated():
     return count
 
 
+def _read_user_prompt(run_dir: Path) -> str | None:
+    """Read the original user prompt from a run's metaprompt metadata.
+
+    Fail-soft: --list must work for legacy and partially generated runs, so
+    missing, malformed, or empty metadata yields None.
+    """
+    try:
+        data = MetadataManager.load_raw(run_dir)
+    except MetadataError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    prompt = data.get("user_prompt")
+    return prompt if isinstance(prompt, str) and prompt else None
+
+
 def list_generated(as_json: bool = False, quiet: bool = False) -> None:
-    """List existing generated prompt runs with their prompt and image counts (read-only)."""
+    """List existing generated prompt runs with prompt/image counts and user prompt (read-only)."""
     image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
     runs = []
     if paths.prompts_dir.exists():
@@ -62,6 +79,7 @@ def list_generated(as_json: bool = False, quiet: bool = False) -> None:
                     "run_id": d.name,
                     "prompt_count": prompt_count,
                     "image_count": image_count,
+                    "user_prompt": _read_user_prompt(d),
                 })
 
     if quiet:
@@ -77,6 +95,11 @@ def list_generated(as_json: bool = False, quiet: bool = False) -> None:
         if run["image_count"]:
             plural = "s" if run["image_count"] != 1 else ""
             line += f", {run['image_count']} image{plural}"
+        user_prompt = run["user_prompt"]
+        if user_prompt:
+            if len(user_prompt) > 60:
+                user_prompt = user_prompt[:60] + "..."
+            line += f" ({user_prompt})"
         click.echo(line)
 
 
@@ -108,7 +131,7 @@ def _status_echo(message: str) -> None:
 @click.option(
     '--list', 'as_list',
     is_flag=True,
-    help='List existing generated prompt runs and their prompt counts'
+    help='List existing generated prompt runs with prompt counts and user prompts'
 )
 @click.option(
     '-n', '--count',
