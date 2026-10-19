@@ -49,7 +49,8 @@ def _read_user_prompt(run_dir: Path) -> str | None:
     """Read the original user prompt from a run's metaprompt metadata.
 
     Fail-soft: --list must work for legacy and partially generated runs, so
-    missing, malformed, or empty metadata yields None.
+    missing, malformed, or non-string prompt fields yield None. Prefer the
+    producer's user_prompt over legacy prompt; empty strings are valid values.
     """
     try:
         data = MetadataManager.load_raw(run_dir)
@@ -58,7 +59,9 @@ def _read_user_prompt(run_dir: Path) -> str | None:
     if not isinstance(data, dict):
         return None
     prompt = data.get("user_prompt")
-    return prompt if isinstance(prompt, str) and prompt else None
+    if not isinstance(prompt, str):
+        prompt = data.get("prompt")
+    return prompt if isinstance(prompt, str) else None
 
 
 def list_generated(as_json: bool = False, quiet: bool = False) -> None:

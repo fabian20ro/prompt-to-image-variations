@@ -356,3 +356,20 @@ No broad dependency refresh or behavioral changes. Discarded unrelated uv resolv
 **Verification:** Isolated locked Python3.10 and CI3.14 suites; no LM call, artifact deletion or completed-proposal rewrite.
 **Insight:** Count present producer artifacts, not all text files or intended metadata counts.
 **Promoted to Lessons Learned:** No
+
+### [2026-10-20] Preserve raw producer and legacy prompts in CLI list
+
+**Context:** New manual human repair scope, not reopened historical proposal consent.
+The public CLI oracle reproduced three failures: legacy prompt absent from JSON,
+invalid modern field preventing fallback, and an explicit empty string becoming null.
+**What happened:** Three separate red/green cycles at `--list --json`; kept the
+existing raw MetadataManager reader, added typed legacy fallback and removed the
+truthiness check. No metadata rewrite, new output label, dependency or generation change.
+Added14 public CLI cases using real producer/metadata serialization, exact Unicode/
+whitespace, precedence, invalid types, raw-response exclusion and read-only inputs.
+**Verification:**1115tests pass on isolated locked LinuxPython3.10.20 and3.14.7;
+Ruff clean; CLI plus unchanged external oracle108PASS. Infrastructure restart/native
+worker/Discord evidence kept separately in the Hermes maintenance audit.
+**Insight:** Optional string presence is a type check, not a truthiness check. Read
+raw metadata before producer defaults can erase the distinction between absent and empty.
+**Promoted to Lessons Learned:** No; explicit zero-value preservation already documented.
