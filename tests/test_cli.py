@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from config import settings
 from cli import main, clean_generated, cli_progress, _status_echo, list_generated
+from metadata_manager import MetadataManager, RunMetadata
 
 
 class TestStatusEcho:
@@ -374,6 +375,41 @@ class TestCliListCommand:
         parsed = json.loads(result.output)
         entry = next(e for e in parsed if e["run_id"] == "run_sunset")
         assert entry["user_prompt"] == "sunset beach"
+
+    @pytest.mark.parametrize("metadata,expected", [
+        ({"prompt": 'Legacy ș 🌈\n"raw"'}, 'Legacy ș 🌈\n"raw"'),
+        ({"user_prompt": 23, "prompt": "Legacy"}, "Legacy"),
+        ({"user_prompt": "", "prompt": "Legacy"}, ""),
+        (RunMetadata(count=99, user_prompt='Știință 🌈\n"raw"'), 'Știință 🌈\n"raw"'),
+        ({"user_prompt": "Modern", "prompt": "Legacy"}, "Modern"),
+        ({"user_prompt": "  \t\n", "prompt": "Legacy"}, "  \t\n"),
+        ({"user_prompt": None, "prompt": "Legacy"}, "Legacy"),
+        ({"user_prompt": False, "prompt": "Legacy"}, "Legacy"),
+        ({"user_prompt": [], "prompt": "Legacy"}, "Legacy"),
+        ({"user_prompt": {}, "prompt": "Legacy"}, "Legacy"),
+        ({"prompt": ""}, ""),
+        ({"user_prompt": None, "prompt": ""}, ""),
+        ({"user_prompt": 23, "prompt": False}, None),
+        ({}, None),
+    ], ids=["legacy", "invalid-modern", "empty-string", "producer", "precedence",
+            "whitespace", "null-modern", "bool-modern", "list-modern", "object-modern",
+            "empty-legacy", "null-modern-empty-legacy", "neither-string", "absent-fields"])
+    def test_list_json_preserves_first_string_from_producer_or_legacy(self, temp_dir, metadata, expected):
+        run = temp_dir / "run"
+        run.mkdir()
+        (run / "image_0.txt").write_text("generated prompt", encoding="utf-8")
+        (run / "image_raw_response.txt").write_text("not a generated prompt", encoding="utf-8")
+        (run / "result.png").write_bytes(b"counted without decoding")
+        MetadataManager.save(run, metadata)
+        before = {path.name: path.read_bytes() for path in run.iterdir()}
+        with patch("cli.paths") as configured:
+            configured.prompts_dir = temp_dir
+            result = CliRunner().invoke(main, ["--list", "--json"])
+        assert result.exit_code == 0, result.exception
+        assert json.loads(result.output) == [{
+            "run_id": "run", "prompt_count": 1, "image_count": 1, "user_prompt": expected,
+        }]
+        assert {path.name: path.read_bytes() for path in run.iterdir()} == before
 
     def test_list_json_null_prompt_without_metadata(self, temp_dir):
         """Test a run with no metadata file lists with user_prompt null and exits 0."""
