@@ -159,7 +159,7 @@ class TestCliListCommand:
                 {"run_id": "run", "prompt_count": 2, "image_count": 1,
                  "user_prompt": None}]
         else:
-            assert result.output == "run: 2 prompts, 1 image\n"
+            assert result.output == "run: 2 prompts, 1 image\nTotal: 1 run, 2 prompts, 1 image\n"
         assert {path.name: path.read_bytes() for path in run.iterdir()} == before
 
     def test_list_nonexistent_dir_no_runs(self, temp_dir):
@@ -198,6 +198,7 @@ class TestCliListCommand:
             result = runner.invoke(main, ["--list"])
         assert result.exit_code == 0
         assert "No runs found." in result.output
+        assert "Total" not in result.output
 
     def test_list_runs_shows_name_and_count(self, temp_dir):
         """Test --list prints one line per run subdirectory with its file count."""
@@ -266,6 +267,52 @@ class TestCliListCommand:
         assert result.exit_code == 0
         assert "run_txt: 2 prompts" in result.output
         assert "image" not in result.output
+
+    def test_list_summary_totals_across_runs(self, temp_dir):
+        """Test --list prints an aggregate Total line after the per-run lines."""
+        prompts = temp_dir / "prompts"
+        run_a = prompts / "run_a"
+        run_a.mkdir(parents=True)
+        (run_a / "p1.txt").write_text("a")
+        (run_a / "p2.txt").write_text("b")
+        (run_a / "p1_0.png").write_text("binary")
+        run_b = prompts / "run_b"
+        run_b.mkdir()
+        (run_b / "p3.txt").write_text("c")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "run_a: 2 prompts, 1 image\n"
+            "run_b: 1 prompts\n"
+            "Total: 2 runs, 3 prompts, 1 image\n"
+        )
+
+    def test_list_summary_totals_plural_images(self, temp_dir):
+        """Test the aggregate Total line pluralizes 'images' for three or more."""
+        prompts = temp_dir / "prompts"
+        for name in ("run_1", "run_2", "run_3"):
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("x")
+            (run / "p1_0.png").write_text("binary")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "run_1: 1 prompts, 1 image\n"
+            "run_2: 1 prompts, 1 image\n"
+            "run_3: 1 prompts, 1 image\n"
+            "Total: 3 runs, 3 prompts, 3 images\n"
+        )
 
     def test_list_json_with_images_counts_by_type(self, temp_dir):
         """Test --list --json reports prompt_count and image_count per file type."""
@@ -442,7 +489,7 @@ class TestCliListCommand:
             result = runner.invoke(main, ["--list"])
 
         assert result.exit_code == 0
-        assert result.output == f"run_long: 1 prompts ({'x' * 60}...)\n"
+        assert result.output == f"run_long: 1 prompts ({'x' * 60}...)\nTotal: 1 run, 1 prompts\n"
 
     def test_list_human_empty_user_prompt_unchanged(self, temp_dir):
         """Test human --list output is byte-identical when user_prompt is empty."""
@@ -459,7 +506,7 @@ class TestCliListCommand:
             result = runner.invoke(main, ["--list"])
 
         assert result.exit_code == 0
-        assert result.output == "run_empty: 1 prompts\n"
+        assert result.output == "run_empty: 1 prompts\nTotal: 1 run, 1 prompts\n"
 
 
 class TestCliValidation:

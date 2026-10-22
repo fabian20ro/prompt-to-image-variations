@@ -104,6 +104,14 @@ def list_generated(as_json: bool = False, quiet: bool = False) -> None:
                 user_prompt = user_prompt[:60] + "..."
             line += f" ({user_prompt})"
         click.echo(line)
+    total_prompts = sum(run["prompt_count"] for run in runs)
+    total_images = sum(run["image_count"] for run in runs)
+    run_plural = "s" if len(runs) != 1 else ""
+    line = f"Total: {len(runs)} run{run_plural}, {total_prompts} prompts"
+    if total_images:
+        plural = "s" if total_images != 1 else ""
+        line += f", {total_images} image{plural}"
+    click.echo(line)
 
 
 def cli_progress(stage: str, current: int = 0, total: int = 0, message: str = "") -> None:
