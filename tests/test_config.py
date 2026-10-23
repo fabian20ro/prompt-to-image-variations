@@ -317,6 +317,33 @@ class TestConfig:
             settings = Settings.from_env()
             assert settings.server.worker_timeout == ServerConfig.worker_timeout
 
+    def test_zero_softness_env_var_is_honored_not_fallen_back(self):
+        """Test that an explicit zero softness is honored, not treated as invalid.
+
+        PROMPT_GEN_ENHANCE_SOFTNESS is documented as [0.0, 1.0] ("must be
+        non-negative"), so zero is a valid boundary value, unlike the negative
+        values that fall back to defaults above. Distinct from
+        test_get_env_float_accepts_positive_zero, which uses the default
+        negative_allowed=True: this pins the negative_allowed=False branch,
+        where a boundary tightened to `fval <= 0` would warn and fall back to
+        0.5, silently replacing an operator-explicit zero.
+        """
+        from config import Settings, EnhancementConfig, _get_env_float, logger
+
+        with patch.dict(os.environ, {"PROMPT_GEN_ENHANCE_SOFTNESS": "0"}), \
+             patch.object(logger, "warning") as mock_warn:
+            result = _get_env_float(
+                "PROMPT_GEN_ENHANCE_SOFTNESS",
+                EnhancementConfig.default_softness,
+                negative_allowed=False,
+            )
+            assert result == 0.0
+            mock_warn.assert_not_called()
+
+        with patch.dict(os.environ, {"PROMPT_GEN_ENHANCE_SOFTNESS": "0"}):
+            settings = Settings.from_env()
+            assert settings.enhancement.default_softness == 0.0
+
     def test_negative_scale_env_var_raises_via_enhancement_config(self):
         """Test that negative scale via env var raises ValueError through EnhancementConfig.
 
