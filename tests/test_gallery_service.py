@@ -588,6 +588,31 @@ class TestGalleryService:
         with pytest.raises(ValueError, match="Access denied"):
             service.validate_file_access(outside_path, temp_dir)
 
+    def test_validate_file_access_symlink_targeting_outside_base(self, temp_dir):
+        """Test validate_file_access rejects a symlink that resolves outside base dir.
+
+        The guard resolves the path (Path.resolve follows symlinks) before the
+        containment check, so a link entry that exists inside base/ but points
+        at a directory outside must raise. A plain lexical relative_to check
+        would let such a symlink through, so the existing tests (which pass
+        lexically-inside or already-resolved paths) do not prove the
+        resolve-based guard.
+        """
+        import os
+
+        base_dir = temp_dir / "base"
+        base_dir.mkdir()
+        # A real directory that exists but lives OUTSIDE base/.
+        outside = temp_dir / "outside_dir"
+        outside.mkdir()
+        # A symlink inside base/ pointing at the outside directory.
+        link_path = base_dir / "link_to_outside"
+        os.symlink(outside, link_path)
+
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(ValueError, match="Access denied"):
+            service.validate_file_access(link_path, base_dir)
+
 
 class TestRunSummary:
     """Tests for get_run_summary."""
