@@ -1,6 +1,7 @@
 """Tests for tracery_runner.py - grammar parsing and expansion."""
 
 import json
+import random
 
 import pytest
 import tracery
@@ -384,3 +385,38 @@ class TestTraceryModifiers:
         for r in results:
             # base_english .a adds 'an' or 'a' based on vowel heuristic
             assert r.startswith("a ") or r.startswith("an ")
+
+    def test_run_tracery_seeded_calls_are_identical(self):
+        """Two calls with the same seed must return identical lists."""
+        # Seeding must happen before the flatten loop: both calls start from
+        # the same random state. A post-loop implementation (seed after the
+        # loop) would let the two calls draw from the advancing global state
+        # and this equality assertion would fail.
+        grammar_json = json.dumps({
+            "origin": ["#mood.a# #animal# in #setting.a#"],
+            "mood": ["happy", "sad", "curious"],
+            "animal": ["cat", "dog", "bird", "fox"],
+            "setting": ["garden", "forest", "city", "cave"],
+        })
+        first = run_tracery(grammar_json, count=10, seed=42)
+        second = run_tracery(grammar_json, count=10, seed=42)
+
+        assert len(first) == 10
+        assert first == second
+
+    def test_run_tracery_unseeded_unchanged(self):
+        """Unseeded calls keep the existing global-random behavior (no new seeding)."""
+        # With no seed, run_tracery must not call random.seed; the global
+        # random module's state must keep advancing exactly as before.
+        grammar_json = json.dumps({
+            "origin": ["#color#"],
+            "color": ["red", "green", "blue"],
+        })
+        state_before = random.getstate()
+        results = run_tracery(grammar_json, count=10)
+        state_after = random.getstate()
+
+        assert len(results) == 10
+        assert set(results) <= {"red", "green", "blue"}
+        # The flatten loop consumes randomness, advancing the PRNG state.
+        assert state_before != state_after
