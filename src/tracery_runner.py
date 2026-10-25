@@ -1,6 +1,8 @@
 """Tracery wrapper for generating text from grammars."""
 
 import json
+import random
+
 import tracery
 from tracery.modifiers import base_english
 
@@ -45,7 +47,7 @@ def generate_one(grammar_dict: dict, origin: str = "origin") -> str:
     return grammar.flatten(f"#{origin}#")
 
 
-def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin") -> list[str]:
+def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin", seed: int | None = None) -> list[str]:
     """
     Generate multiple texts from a Tracery grammar.
 
@@ -53,6 +55,9 @@ def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin") -> 
         grammar_json: JSON string containing Tracery grammar
         count: Number of variations to generate
         origin: The starting rule (default: "origin")
+        seed: Optional seed for the global random module. When given, the
+            module is seeded before the flatten loop so repeated calls with
+            the same seed produce identical output.
 
     Returns:
         List of generated texts
@@ -66,6 +71,9 @@ def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin") -> 
     grammar_dict = parse_grammar(grammar_json)
     grammar = tracery.Grammar(grammar_dict)
     grammar.add_modifiers(base_english)
+
+    if seed is not None:
+        random.seed(seed)
 
     results = []
     for _ in range(count):

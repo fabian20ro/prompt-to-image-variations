@@ -246,7 +246,7 @@ class PipelineExecutor:
             images_per_prompt: Number of images per prompt
             width: Image width
             height: Image height
-            seed: Random seed
+            seed: Random seed; also seeds the Tracery prompt expansion
             max_prompts: Limit prompts to render
             tiled_vae: Use tiled VAE decoding
             enhance: Enable SeedVR2 enhancement
@@ -280,7 +280,7 @@ class PipelineExecutor:
         self.on_progress("expanding_prompts", 0, count, f"Expanding {count} prompts...")
 
         try:
-            outputs = run_tracery(grammar, count=count)
+            outputs = run_tracery(grammar, count=count, seed=seed)
         except TraceryError as e:
             return PipelineResult(success=False, error=f"Tracery expansion failed: {e}")
 

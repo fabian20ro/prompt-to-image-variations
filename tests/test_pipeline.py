@@ -260,6 +260,41 @@ class TestRunFullPipeline:
         assert meta_content["user_prompt"] == "test prompt"
         assert "created_at" in meta_content
 
+    @patch("pipeline.generate_grammar")
+    @patch("pipeline.run_tracery")
+    @patch("pipeline.create_gallery")
+    @patch("pipeline.generate_master_index")
+    def test_run_full_pipeline_passes_seed_to_tracery(
+        self, mock_index, mock_gallery, mock_tracery, mock_grammar, temp_dir
+    ):
+        """run_full_pipeline must forward seed as a keyword argument to run_tracery.
+
+        With seed=123 the tracery expansion is reproducible, so the mocked
+        run_tracery call must carry seed=123 in its kwargs. An implementation
+        that drops or passes seed positionally would fail the kwargs assertion.
+        """
+        mock_grammar.return_value = ('{"origin": ["test"]}', False, "raw response")
+        mock_tracery.return_value = ["prompt 1"]
+        mock_gallery.return_value = temp_dir / "test_gallery.html"
+
+        with patch("pipeline.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "prompts"
+            mock_paths.prompts_dir.mkdir(parents=True)
+            mock_paths.generated_dir = temp_dir
+
+            executor = PipelineExecutor()
+
+            result = executor.run_full_pipeline(
+                prompt="test prompt",
+                count=1,
+                prefix="test",
+                generate_images=False,
+                seed=123,
+            )
+
+        assert result.success is True
+        assert mock_tracery.call_args.kwargs["seed"] == 123
+
     @patch("pipeline.generate_master_index")
     @patch("pipeline.create_gallery")
     @patch("pipeline.run_tracery")
