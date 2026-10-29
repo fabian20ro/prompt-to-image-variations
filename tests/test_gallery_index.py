@@ -152,6 +152,37 @@ class TestGalleryIndexInteractive:
 
         assert content.index("NEWEST RUN PROMPT") < content.index("OLDEST RUN PROMPT")
 
+    def test_index_skips_directories_without_timestamp_prefix(self, temp_dir):
+        """Only directories whose names carry the timestamp prefix are indexed.
+
+        generate_master_index gates active runs on a YYYYMMDD_HHMMSS_ directory
+        name so the extracted display timestamp stays meaningful. Every existing
+        run test uses matching names, so a regression that dropped the name check
+        would silently render stray directories in the index.
+        """
+        matching = temp_dir / "prompts" / "20240101_120000_realrun"
+        matching.mkdir(parents=True)
+        (matching / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "VALID RUN PROMPT",
+        }))
+        (matching / "test_gallery.html").write_text("<html></html>")
+
+        stray = temp_dir / "prompts" / "notes_20240101_120000"
+        stray.mkdir(parents=True)
+        (stray / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "STRAY DIR PROMPT",
+        }))
+        (stray / "test_gallery.html").write_text("<html></html>")
+
+        content = generate_master_index(temp_dir).read_text()
+
+        assert "VALID RUN PROMPT" in content
+        assert "STRAY DIR PROMPT" not in content
+
     def test_index_flat_archive_prefers_display_title(self, temp_dir):
         """Flat archive cards should prefer display_title over raw user_prompt."""
         saved_dir = temp_dir / "saved"
