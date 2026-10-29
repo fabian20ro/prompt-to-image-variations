@@ -262,6 +262,35 @@ class TestLoadGrammarHistoryEdgeCases:
         assert result == []
         assert not (run_dir / "corrupted_test_grammar.json").exists()
 
+    def test_corrupted_json_falls_back_to_disk_grammar_file(self, run_dir):
+        """Corrupted history file + grammar file on disk must recover the current grammar.
+
+        The sibling ``test_returns_empty_on_corrupted_json_with_no_fallback`` covers the
+        corrupted-file case with NO fallback source. The disk-grammar read at line 23-25
+        of load_grammar_history is only reached when current_grammar is None, and every
+        other corrupted-JSON test in this module either passes current_grammar explicitly
+        or has no grammar file on disk — so the exact combination "history file exists
+        but is unparseable, disk grammar file present" is unexercised.
+
+        This is the session-recovery path: append_grammar_revision calls
+        load_grammar_history with current_grammar=None, so a regression that
+        consults the disk grammar file only when the history file is absent (or that
+        returns [] after a parse failure when a file exists) would lose the user's
+        current grammar — the next append would then rewrite history as a single
+        fabricated entry, silently discarding every prior revision.
+        """
+        path = _history_path(run_dir, "corrupt_disk_test")
+        path.write_text("<<<corrupted json{{{")
+        grammar_text = '{"origin": ["disk_fallback"]}'
+        (run_dir / "corrupt_disk_test_grammar.json").write_text(grammar_text)
+
+        result = load_grammar_history(run_dir, "corrupt_disk_test")
+
+        assert len(result) == 1
+        assert result[0]["id"] == "initial"
+        assert result[0]["action"] == "initial"
+        assert result[0]["grammar"] == grammar_text
+
     def test_skips_when_grammar_is_empty_or_whitespace(self, run_dir):
         append_grammar_revision(run_dir, "test", grammar="initial", action="initial")
         history = append_grammar_revision(run_dir, "test", grammar="   ", action="initial")
