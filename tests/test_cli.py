@@ -314,6 +314,26 @@ class TestCliListCommand:
             "Total: 3 runs, 3 prompts, 3 images\n"
         )
 
+    def test_list_full_shows_untruncated_prompt(self, temp_dir):
+        """Test --list --full shows the complete user prompt; without --full it truncates at 60 chars."""
+        long_prompt = "a" * 100
+        run = temp_dir / "prompts" / "run"
+        run.mkdir(parents=True)
+        (run / "prompt_0.txt").write_text("a")
+        (run / "prompt.metaprompt.json").write_text(
+            json.dumps({"prefix": "prompt", "count": 1, "user_prompt": long_prompt})
+        )
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "prompts"
+            result = runner.invoke(main, ["--list"])
+            assert result.exit_code == 0
+            assert f"run: 1 prompts ({long_prompt[:60]}...)" in result.output
+            assert long_prompt not in result.output
+            result = runner.invoke(main, ["--list", "--full"])
+            assert result.exit_code == 0
+            assert f"run: 1 prompts ({long_prompt})" in result.output
+
     def test_list_json_with_images_counts_by_type(self, temp_dir):
         """Test --list --json reports prompt_count and image_count per file type."""
         prompts = temp_dir / "prompts"

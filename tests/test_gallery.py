@@ -499,6 +499,15 @@ const vm = require('node:vm'), assert = require('node:assert/strict');
 
         assert "No metadata file found" in str(exc_info.value)
 
+    def test_generate_gallery_raises_when_no_prompt_files(self, temp_dir):
+        """A run directory with metadata but zero prompt files must fail loudly, not build an empty gallery."""
+        create_run_files(temp_dir, num_prompts=0)
+
+        with pytest.raises(ValueError) as exc_info:
+            generate_gallery_for_directory(temp_dir, interactive=True)
+
+        assert "No prompt files found" in str(exc_info.value)
+
     def test_gallery_raw_response_link_rendered_without_grammar(self, temp_dir):
         """When only raw_response_file is provided the header must still show its link."""
         run_dir = temp_dir

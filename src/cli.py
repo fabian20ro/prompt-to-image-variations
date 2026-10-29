@@ -64,7 +64,7 @@ def _read_user_prompt(run_dir: Path) -> str | None:
     return prompt if isinstance(prompt, str) else None
 
 
-def list_generated(as_json: bool = False, quiet: bool = False) -> None:
+def list_generated(as_json: bool = False, quiet: bool = False, full: bool = False) -> None:
     """List existing generated prompt runs with prompt/image counts and user prompt (read-only)."""
     image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
     runs = []
@@ -100,7 +100,7 @@ def list_generated(as_json: bool = False, quiet: bool = False) -> None:
             line += f", {run['image_count']} image{plural}"
         user_prompt = run["user_prompt"]
         if user_prompt:
-            if len(user_prompt) > 60:
+            if not full and len(user_prompt) > 60:
                 user_prompt = user_prompt[:60] + "..."
             line += f" ({user_prompt})"
         click.echo(line)
@@ -143,6 +143,10 @@ def _status_echo(message: str) -> None:
     '--list', 'as_list',
     is_flag=True,
     help='List existing generated prompt runs with prompt counts and user prompts'
+)
+@click.option(
+    '--full', is_flag=True,
+    help='With --list: show the complete user prompt (no 60-char truncation)'
 )
 @click.option(
     '-n', '--count',
@@ -317,6 +321,7 @@ def main(
     version_check: bool = False,
     dump_config: bool = False,
     as_list: bool = False,
+    full: bool = False,
 ):
     """
     Generate ERNIE-Image-Turbo prompt variations using local LLM-powered Tracery grammars.
@@ -365,7 +370,7 @@ def main(
 
     # Handle --list: read-only inspection, no pipeline or LM Studio needed
     if as_list:
-        list_generated(as_json=as_json, quiet=quiet)
+        list_generated(as_json=as_json, quiet=quiet, full=full)
         return
 
     # Handle --clean
