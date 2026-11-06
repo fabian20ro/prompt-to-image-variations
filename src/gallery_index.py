@@ -89,17 +89,20 @@ def _extract_run_info(run_dir: Path, is_archive: bool = False) -> dict | None:
     Returns:
         Dictionary with run info, or None if not a valid run
     """
-    # Find metadata file
-    meta_files = []
-    for pattern in ["*.metaprompt.json", "*_metadata.json"]:
-        meta_files = list(run_dir.glob(pattern))
-        if meta_files:
-            break
+    # Find metadata file - prefer {prefix}.metaprompt.json pattern
+    meta_files = list(run_dir.glob("*.metaprompt.json")) + list(
+        run_dir.glob("*_metadata.json")
+    )
+
     if not meta_files:
         return None
 
+    # Prefer files matching common prefix patterns when multiple exist
+    preferred = [f for f in meta_files if "image" in f.name or "prefix" in f.name]
+    chosen_file = preferred[0] if preferred else meta_files[0]
+
     try:
-        metadata = json.loads(meta_files[0].read_text())
+        metadata = json.loads(chosen_file.read_text())
     except (json.JSONDecodeError, IOError):
         return None
 
@@ -134,6 +137,17 @@ def _extract_run_info(run_dir: Path, is_archive: bool = False) -> dict | None:
     # Get prompt count
     prompt_count = metadata.get("count", 0)
 
+    # Count grammar revisions (1 when no history file was written)
+    grammar_revisions = 1
+    history_path = run_dir / f"{prefix}_grammar_history.json"
+    if history_path.exists():
+        try:
+            history_data = json.loads(history_path.read_text())
+            if isinstance(history_data, list):
+                grammar_revisions = len(history_data)
+        except (json.JSONDecodeError, IOError):
+            pass
+
     # Build paths based on whether this is an archive
     if is_archive:
         gallery_path = f"saved/{run_dir.name}/{prefix}_gallery.html"
@@ -155,6 +169,7 @@ def _extract_run_info(run_dir: Path, is_archive: bool = False) -> dict | None:
         "thumbnail_file": thumbnail_file,
         "image_count": image_count,
         "prompt_count": prompt_count,
+        "grammar_revisions": grammar_revisions,
         "model": metadata.get("model") or metadata.get("image_generation", {}).get("model") or "N/A",
         "is_archive": is_archive,
         "backup_reason": backup_reason,
@@ -179,13 +194,26 @@ def _extract_flat_archive_infos(saved_dir: Path, interactive: bool = False) -> l
         timestamp = archive["timestamp"]
         first_image = archive["first_image"]
 
+        # Count unique prompts by extracting prompt indices from image filenames
+        import re as _re
+        prompt_idx_pattern = _re.compile(rf'^{re.escape(prefix)}_\d+_(\d+)_.+\.png$')
+        prompt_indices = set()
+        for img_path in archive.get("images", []):
+            match = prompt_idx_pattern.match(img_path.name)
+            if match:
+                prompt_indices.add(match.group(1))
+
         # Format timestamp for display
         display_time = format_run_timestamp(timestamp)
 
-        # Get metadata from first image
+        # Get metadata from first image (gracefully handle extraction errors)
         metadata = {}
         if first_image:
-            metadata = get_flat_archive_metadata(first_image)
+            try:
+                metadata = get_flat_archive_metadata(first_image)
+            except (RuntimeError, IOError, OSError):
+                # Corrupted or unreadable metadata - use defaults
+                pass
 
         # Get backup reason from embedded metadata
         backup_reason = metadata.get("backup_reason", "archived")
@@ -194,8 +222,9 @@ def _extract_flat_archive_infos(saved_dir: Path, interactive: bool = False) -> l
             "prefix": prefix,
             "timestamp": timestamp,
             "display_time": display_time,
-            "user_prompt": metadata.get("user_prompt", "Archived images"),
+            "user_prompt": metadata.get("display_title") or metadata.get("user_prompt", "Archived images"),
             "image_count": archive["image_count"],
+            "prompt_count": len(prompt_indices),
             "model": metadata.get("model", "N/A"),
             "first_image": first_image,
             "backup_reason": backup_reason,
@@ -690,8 +719,12 @@ def _build_card_html(run: dict, interactive: bool, is_archive: bool = False) -> 
     # Add delete button for active galleries in interactive mode
     delete_btn_html = ""
     if interactive and not is_archive:
+        # JSON-escape the gallery id so quotes/backslashes cannot break the
+        # inline JS, and neutralize "</" so the id cannot terminate the
+        # enclosing <script> block.
+        delete_id = json.dumps(run["dir_name"]).replace("</", "<\\/")
         delete_btn_html = f'''
-      <button class="btn-delete" onclick="event.preventDefault(); event.stopPropagation(); deleteGallery('{run["dir_name"]}');" title="Delete gallery">
+      <button class="btn-delete" onclick="event.preventDefault(); event.stopPropagation(); deleteGallery({delete_id});" title="Delete gallery">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="3 6 5 6 21 6"></polyline>
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -706,7 +739,8 @@ def _build_card_html(run: dict, interactive: bool, is_archive: bool = False) -> 
         <div class="prompt" title="{escaped_prompt}">{truncated_prompt}</div>
         <div class="meta">
           <span class="time">{run["display_time"]}</span>
-          <span class="stats">{run["image_count"]} images | {run["prompt_count"]} prompts</span>
+          <span class="stats">{run["image_count"]} {'image' if run['image_count'] == 1 else 'images'} | {run["prompt_count"]} {'prompt' if run['prompt_count'] == 1 else 'prompts'}</span>
+          <span class="grammar-revisions">{run.get("grammar_revisions", 1)} {'grammar revision' if run.get("grammar_revisions", 1) == 1 else 'grammar revisions'}</span>
           <span class="model">{run["model"]}</span>
         </div>
       </div>
@@ -747,7 +781,7 @@ def _build_flat_archive_card_html(archive: dict, interactive: bool) -> str:
         <div class="prompt" title="{escaped_prompt}">{truncated_prompt}</div>
         <div class="meta">
           <span class="time">{archive["display_time"]}</span>
-          <span class="stats">{archive["image_count"]} images</span>
+          <span class="stats">{archive["image_count"]} {'image' if archive['image_count'] == 1 else 'images'}</span>
           <span class="model">{archive["model"]}</span>
         </div>
       </div>

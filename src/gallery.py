@@ -116,12 +116,15 @@ def _build_card_html(
       <div class="card-actions">
         <button class="btn-small btn-primary" onclick="generateImage(this, {prompt_idx}, {image_idx})">Generate</button>
         <button class="btn-small btn-secondary" onclick="enhanceImage(this, {prompt_idx}, {image_idx})">Enhance</button>
+        <button class="btn-small btn-secondary" onclick="copyPrompt(this)">Copy</button>
       </div>'''
 
     if exists:
+        # Use the prompt text as alt text for accessibility.
+        # `escaped_prompt` is already HTML-escaped, so it's safe to embed directly.
         return f'''    <div class="card" data-image="{image_filename}" data-prompt-idx="{prompt_idx}" data-image-idx="{image_idx}">
       <a href="{image_filename}" target="_blank">
-        <img src="{image_filename}" loading="lazy">
+        <img src="{image_filename}" loading="lazy" alt="{escaped_prompt}">
       </a>
       <div class="prompt">{escaped_prompt}</div>{action_buttons}
     </div>'''
@@ -132,7 +135,7 @@ def _build_card_html(
       <div class="prompt">{escaped_prompt}</div>{action_buttons}
     </div>'''
     else:
-        return f'''    <div class="card" data-image="{image_filename}" data-prompt-idx="{prompt_idx}" data-image-idx="{image_idx}">
+        return f'''    <div class="card" data-image="{image_filename}" data-prompt-idx="{prompt_idx}" data-image-idx="{image_idx}" role="status" aria-label="Generating: {escaped_prompt}" aria-busy="true">
       <div class="placeholder">Pending...</div>
       <div class="prompt">{escaped_prompt}</div>{action_buttons}
     </div>'''
@@ -170,18 +173,40 @@ def update_gallery(
             rf'<div class="placeholder">Pending\.\.\.</div>'
         )
 
-        replacement = (
-            rf'\1\n      <a href="{image_filename}" target="_blank">\n'
-            rf'        <img src="{image_filename}" loading="lazy">\n'
-            rf'      </a>'
-        )
+        escaped_prompt = html.escape(prompt) if prompt else ""
 
-        html_content = re.sub(placeholder_pattern, replacement, html_content)
+        def _replace_placeholder(match: re.Match[str]) -> str:
+            # Clear the live-region/busy state on the completed card; still-pending
+            # cards keep their attributes so assistive technology keeps announcing
+            # updates there.
+            opening = re.sub(r'\s*role="status"', "", match.group(1))
+            opening = re.sub(r'\s*aria-busy="true"', "", opening)
+            return (
+                f'{opening}\n      <a href="{image_filename}" target="_blank">\n'
+                f'        <img src="{image_filename}" loading="lazy" alt="{escaped_prompt}">\n'
+                f'      </a>'
+            )
+
+        html_content = re.sub(placeholder_pattern, _replace_placeholder, html_content)
 
         # Update the status count
         status_pattern = r'<p class="status">Generated: \d+ / \d+ images</p>'
         status_replacement = f'<p class="status">Generated: {completed} / {total} images</p>'
         html_content = re.sub(status_pattern, status_replacement, html_content)
+
+        # Keep the fixed progress bar in sync with the status line
+        progress_pct = round(completed / total * 100) if total else 0
+        html_content = re.sub(
+            r'(<div id="progress-fill"[^>]*style="width: )\d+(%)',
+            rf'\g<1>{progress_pct}\g<2>',
+            html_content,
+        )
+        progress_label = f"Generated: {completed} / {total} images"
+        html_content = re.sub(
+            r'(<span id="progress-text">)[^<]*(</span>)',
+            rf'\g<1>{progress_label}\g<2>',
+            html_content,
+        )
 
         gallery_path.write_text(html_content)
 
@@ -799,6 +824,23 @@ def _build_interactive_js(run_id: str, grammar_history: list[dict]) -> str:
     progressBar.classList.remove('hidden');
     progressMessage.textContent = `Enhancing image ${{promptIdx}}_${{imageIdx}}...`;
     showToast(`Queued enhancement for ${{promptIdx}}_${{imageIdx}}`, 'success');
+  }};
+
+  window.copyPrompt = async function(btn) {{
+    const card = btn.closest('.card');
+    if (!card) return;
+    const promptEl = card.querySelector('.prompt');
+    const text = promptEl ? promptEl.textContent : '';
+    if (!text) return;
+    try {{
+      if (typeof navigator.clipboard?.writeText !== 'function') {{
+        throw new Error('Clipboard unavailable');
+      }}
+      await navigator.clipboard.writeText(text);
+      showToast('Prompt copied to clipboard', 'success');
+    }} catch {{
+      showToast('Failed to copy prompt', 'error');
+    }}
   }};
 
   if (grammarEditor) {{

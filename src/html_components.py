@@ -8,6 +8,25 @@ to improve maintainability and reduce code duplication.
 class LogPanel:
     """Log panel component for displaying generation logs."""
 
+    REQUIRED_HTML_IDS = ("log-panel", "log-content", "log-count", "btn-clear-logs")
+
+    @classmethod
+    def validate(cls) -> None:
+        """Assert the produced HTML contains every required element ID.
+
+        Raises ValueError if any critical DOM node is missing — which would break
+        JavaScript bindings in log panel consumers. Calling this after editing
+        LogPanel.html() catches regressions (e.g., renaming an id or removing a
+        required button) before they reach production galleries.
+        """
+        produced = cls.html()
+        for element_id in cls.REQUIRED_HTML_IDS:
+            if f'id="{element_id}"' not in produced and f"id='{element_id}'" not in produced:
+                raise ValueError(
+                    f"LogPanel HTML is missing required element id='{element_id}'. "
+                    f"The panel will silently fail to bind JavaScript event handlers."
+                )
+
     @staticmethod
     def html() -> str:
         """Build the collapsible log panel HTML."""
@@ -190,8 +209,9 @@ class Notifications:
     def css() -> str:
         """CSS for toast and confirm dialog."""
         return '''
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
     .toast-region { position: fixed; top: 12px; right: 12px; z-index: 2500; display: flex; flex-direction: column; gap: 8px; max-width: min(92vw, 360px); }
-    .toast { border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #fff; background: #2f3a48; border: 1px solid #44556b; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+    .toast { border-radius: 8px; padding: 10px 12px; font-size: 14px; color: #fff; background: #2f3a48; border: 1px solid #44556b; box-shadow: 0 4px 14px rgba(0,0,0,0.25); animation: fadeIn 0.2s ease-out; }
     .toast.success { background: #1f4b2f; border-color: #2f7244; }
     .toast.error { background: #562727; border-color: #8f3d3d; }
     .confirm-modal { position: fixed; inset: 0; z-index: 2600; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); padding: 16px; }
@@ -211,6 +231,9 @@ class Notifications:
     const el = document.createElement('div');
     el.className = `toast ${type}`;
     el.textContent = message;
+    el.style.cursor = 'pointer';
+    el.title = 'Click to dismiss';
+    el.onclick = () => el.remove();
     region.appendChild(el);
     setTimeout(() => {
       el.remove();

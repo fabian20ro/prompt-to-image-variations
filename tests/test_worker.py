@@ -133,6 +133,65 @@ class TestWorkerKillCurrent:
         worker.queue_manager.cancel_task.assert_called()
         assert worker._current_process is None
 
+    @pytest.mark.asyncio
+    async def test_kill_current_force_kills_on_timeout(self, worker):
+        """Test kill_current() force-kills process when wait times out."""
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.terminate = MagicMock()
+        mock_process.kill = MagicMock()
+
+        # Simulate hung process: first wait times out, second returns immediately
+        call_count = [0]
+
+        async def mock_wait():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise asyncio.TimeoutError("process did not exit")
+            return 0
+
+        mock_process.wait = mock_wait
+
+        worker._current_process = mock_process
+        worker.queue_manager.get_state.return_value = MockQueueState(
+            current_task=MockTask()
+        )
+
+        result = await worker.kill_current()
+
+        assert result is True
+        mock_process.terminate.assert_called_once()
+        mock_process.kill.assert_called_once()
+        worker.queue_manager.cancel_task.assert_called()
+        assert worker._current_process is None
+
+    @pytest.mark.asyncio
+    async def test_kill_current_no_active_task_in_queue(self, worker):
+        """Test kill_current() when queue state has no current task — cancel_task must not be called."""
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.terminate = MagicMock()
+        mock_process.kill = MagicMock()
+
+        async def mock_wait():
+            return 0
+
+        mock_process.wait = mock_wait
+
+        worker._current_process = mock_process
+        # Queue state reports no active task — the guard at worker.py:92 should skip cancel_task
+        worker.queue_manager.get_state.return_value = MockQueueState(current_task=None)
+
+        result = await worker.kill_current()
+
+        assert result is True
+        mock_process.terminate.assert_called_once()
+        # kill should NOT be called — graceful terminate succeeded
+        mock_process.kill.assert_not_called()
+        # cancel_task must not be called when there is no active task to cancel
+        worker.queue_manager.cancel_task.assert_not_called()
+        assert worker._current_process is None
+
 
 class TestWorkerReadStderr:
     """Tests for Worker._read_stderr() method."""
@@ -160,9 +219,69 @@ class TestWorkerReadStderr:
         assert result == ["Line 1", "Line 2"]
         assert worker.queue_manager.emit_log.call_count == 2
 
+    @pytest.mark.asyncio
+    async def test_read_stderr_filters_empty_lines(self, worker):
+        """Test that _read_stderr filters empty/whitespace-only lines."""
+        # Real content first; blanks come after so EOF doesn't cut early.
+        _content = [b"Line 1\n", b"Line 2\n", b"\n", b"  \t  \n"]
+
+        class MockStderr:
+            def __init__(self):
+                self._idx = 0
+
+            async def readline(self):
+                if self._idx < len(_content):
+                    result = _content[self._idx]
+                    self._idx += 1
+                    return result
+                # EOF sentinel — only after all real content exhausted
+                return b""
+
+        mock_process = MagicMock()
+        mock_process.stderr = MockStderr()
+
+        result = await worker._read_stderr(mock_process, "test-task-id")
+
+        assert result == ["Line 1", "Line 2"]
+        # emit_log should only be called for non-empty lines (2 calls)
+        assert worker.queue_manager.emit_log.call_count == 2
+
 
 class TestWorkerExecuteTask:
     """Tests for Worker._execute_task() method."""
+
+    @pytest.mark.asyncio
+    async def test_execute_task_times_out_on_hung_process(self, worker):
+        """Test that _execute_task times out and fails the task on a hung process."""
+        # Use a very short timeout so the test is fast
+        worker.task_timeout = 0.1
+
+        task = MockTask()
+
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+        mock_process.returncode = None
+
+        class HungStdout:
+            async def readline(self):
+                await asyncio.sleep(10)
+                return b""
+
+        mock_process.stdout = HungStdout()
+        mock_process.stderr = MagicMock()
+
+        async def mock_wait():
+            return 0
+
+        mock_process.wait = mock_wait
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            await worker._execute_task(task)
+
+        worker.queue_manager.fail_task.assert_called_once()
+        call_args = worker.queue_manager.fail_task.call_args[0]
+        assert "timeout" in call_args[1].lower() or "exceeded" in call_args[1].lower()
+        mock_process.terminate.assert_called_once()
 
     def _create_mock_process(self, stdout_lines, stderr_lines, return_code=0):
         """Create a mock process with given stdout/stderr lines."""
@@ -199,6 +318,30 @@ class TestWorkerExecuteTask:
         mock_process.wait = mock_wait
 
         return mock_process
+
+    @pytest.mark.asyncio
+    async def test_execute_task_tracks_pid_on_spawn(self, worker):
+        """Test that update_task_pid is called with correct args when process spawns."""
+        task = MockTask(task_id="pid-test-id")
+
+        result_json = json.dumps({
+            "type": "result",
+            "success": True,
+            "data": {"run_id": "test-run"},
+        })
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[result_json.encode() + b"\n", b""],
+            stderr_lines=[b""],
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_spawn:
+            await worker._execute_task(task)
+
+        mock_spawn.assert_called_once()
+        worker.queue_manager.update_task_pid.assert_called_with(
+            "pid-test-id", mock_process.pid
+        )
 
     @pytest.mark.asyncio
     async def test_execute_task_handles_success(self, worker):
@@ -268,7 +411,15 @@ class TestWorkerExecuteTask:
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await worker._execute_task(task)
 
-        worker.queue_manager.update_progress.assert_called()
+        worker.queue_manager.update_progress.assert_called_once_with(
+            task.id,
+            TaskProgress(
+                stage="generating",
+                current=1,
+                total=10,
+                message="Working...",
+            ),
+        )
 
     @pytest.mark.asyncio
     async def test_execute_task_handles_image_ready(self, worker):
@@ -308,7 +459,29 @@ class TestWorkerExecuteTask:
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             await worker._execute_task(task)
 
-        worker.queue_manager.fail_task.assert_called()
+        # Should fail the task with error from stderr lines joined by "; "
+        worker.queue_manager.fail_task.assert_called_with(
+            task.id, "Error occurred"
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_task_handles_nonzero_exit_multiple_stderr(self, worker):
+        """Test that multiple stderr lines are joined with '; ' as error message."""
+        task = MockTask()
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[b""],
+            stderr_lines=[b"Err1\n", b"Err2\n", b"Err3\n", b"Err4\n", b""],
+            return_code=2,
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            await worker._execute_task(task)
+
+        # Should join at most 3 stderr lines with "; " separator
+        worker.queue_manager.fail_task.assert_called_with(
+            task.id, "Err1; Err2; Err3"
+        )
 
     @pytest.mark.asyncio
     async def test_execute_task_handles_exception(self, worker):
@@ -336,6 +509,119 @@ class TestWorkerExecuteTask:
 
                 # Should have logged a warning about invalid JSON
                 mock_warn.assert_called()
+
+        # Non-JSON noise on a clean exit must not fail the task: with no
+        # parsed result data, the task completes as None instead of failing.
+        worker.queue_manager.complete_task.assert_called_once_with(task.id, None)
+        worker.queue_manager.fail_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_task_handles_nonzero_exit_empty_stderr(self, worker):
+        """Test that non-zero exit with empty stderr uses fallback error message."""
+        task = MockTask()
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[b""],
+            stderr_lines=[b""],
+            return_code=1,
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            await worker._execute_task(task)
+
+        # Should fail the task with fallback message about exit code
+        worker.queue_manager.fail_task.assert_called_with(
+            task.id, "Process exited with code 1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_task_handles_stdout_eof_without_json(self, worker):
+        """Test that a subprocess exiting without producing any stdout output fails the task."""
+        task = MockTask()
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[b""],
+            stderr_lines=[b""],
+            return_code=1,
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            await worker._execute_task(task)
+
+        # With no JSON result and non-zero exit code, should use fallback exit code message
+        worker.queue_manager.fail_task.assert_called_once()
+        call_args = worker.queue_manager.fail_task.call_args[0]
+        assert call_args[1] == "Process exited with code 1"
+
+    @pytest.mark.asyncio
+    async def test_execute_task_json_error_overrides_stderr(self, worker):
+        """Test that JSON-detected failure takes precedence over non-zero exit stderr."""
+        task = MockTask()
+
+        result_json = json.dumps({
+            "type": "result",
+            "success": False,
+            "error": "API key expired",
+        })
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[result_json.encode() + b"\n", b""],
+            stderr_lines=[b"internal server error\n", b""],
+            return_code=1,
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            await worker._execute_task(task)
+
+        # JSON failure message should take precedence over stderr join,
+        # and fail_task must be called exactly once with that message
+        worker.queue_manager.fail_task.assert_called_once_with(
+            task.id, "API key expired"
+        )
+        worker.queue_manager.complete_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_task_inner_handles_cancellation(self, worker):
+        """Test that cancelling an in-flight task terminates the subprocess, marks the
+        task cancelled (never failed/completed), re-raises, and clears _current_process.
+
+        Distinguishes a refactor that treats a shutdown cancel as a failure
+        (fail_task instead of cancel_task) or drops the `raise` so the run loop
+        swallows the cancellation and keeps running.
+        """
+        task = MockTask(task_id="cancel-test-id")
+
+        mock_process = self._create_mock_process(
+            stdout_lines=[b""],
+            stderr_lines=[b""],
+        )
+        # The post-read-loop wait() is the cancellation point; the handler's own
+        # (graceful) wait() must return normally.
+        wait_calls = [0]
+
+        async def mock_wait():
+            wait_calls[0] += 1
+            if wait_calls[0] == 1:
+                await asyncio.sleep(0)  # drain the concurrent stderr reader
+                raise asyncio.CancelledError()
+            return 0
+
+        mock_process.wait = mock_wait
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            with pytest.raises(asyncio.CancelledError):
+                await worker._run_task_inner(task)
+
+        # Subprocess terminated gracefully, never hard-killed.
+        mock_process.terminate.assert_called_once()
+        mock_process.kill.assert_not_called()
+        # Cancelled with the task's own id — distinct from kill_current's get_state path.
+        worker.queue_manager.cancel_task.assert_called_once_with(task.id)
+        # A cancellation is neither a completion nor a failure.
+        worker.queue_manager.complete_task.assert_not_called()
+        worker.queue_manager.fail_task.assert_not_called()
+        # Stale process reference cleared so a later kill_current() is a no-op.
+        assert worker._current_process is None
 
 
 class TestWorkerRun:

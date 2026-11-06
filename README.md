@@ -1,4 +1,4 @@
-# FLUX 3 Image Prompt Expander
+# Prompt to Image Variations
 
 Local procedural prompt generation and image rendering for FLUX 3 Image Klein on Apple Silicon.
 
@@ -207,7 +207,7 @@ uv run python scripts/verify_flux3.py --mode corpus
 uv run python scripts/verify_flux3.py --mode e2e
 ```
 
-The corpus generates 12 requests twice; inspect its saved samples for semantic coherence. E2E runs two uncached Qwen → FLUX q4 → SeedVR2 cycles at 864×1152, recording dimensions, memory and LM Studio state. Outputs are in `generated/verification/`. These checks are opt-in and use local inference. Worker heartbeats keep long tasks observable; the worker timeout is a liveness check, not a five-minute generation deadline.
+The corpus generates 12 requests twice; inspect its saved samples for semantic coherence. E2E runs two uncached Qwen → FLUX q4 → SeedVR2 cycles at 864×1152, recording dimensions, memory and LM Studio state. Outputs are in `generated/verification/`. These checks are opt-in and use local inference. Worker heartbeats keep long tasks observable; `PROMPT_GEN_WORKER_TIMEOUT` controls liveness checks, not a five-minute generation deadline. The web worker has a separate 30-minute overall task deadline; large batches may need splitting. Direct CLI runs do not use that web-worker deadline.
 
 Measured results and remaining acceptance limits: [verification report](docs/flux3-verification.md).
 

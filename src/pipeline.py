@@ -101,8 +101,6 @@ def _legacy_run_error(directory: Path | None, creating: bool = False) -> Pipelin
         return PipelineResult(success=False, error="Incompatible or unknown image model. Import the grammar into a new run.")
     return None
 
-
-
 def _null_progress(stage: str, current: int = 0, total: int = 0, message: str = "") -> None:
     """No-op progress callback."""
     pass
@@ -163,7 +161,7 @@ class PipelineExecutor:
             images_per_prompt: Number of images per prompt
             width: Image width
             height: Image height
-            seed: Random seed
+            seed: Random seed; also seeds the Tracery prompt expansion
             max_prompts: Limit prompts to render
             enhance_tiled_vae: Use tiled VAE decoding
             enhance: Enable SeedVR2 enhancement
@@ -206,7 +204,7 @@ class PipelineExecutor:
         self.on_progress("expanding_prompts", 0, count, f"Expanding {count} prompts...")
 
         try:
-            outputs = run_tracery(grammar, count=count)
+            outputs = run_tracery(grammar, count=count, seed=seed)
         except TraceryError as e:
             return PipelineResult(success=False, error=f"Tracery expansion failed: {e}")
 
@@ -362,10 +360,11 @@ class PipelineExecutor:
 
         # Try to find metadata for original prompt
         # Match metadata specifically to the grammar file name
-        meta_path = grammar_path.with_suffix('.metaprompt.json')
+        grammar_stem = grammar_path.stem.removesuffix('.tracery')
+        meta_path = grammar_path.with_name(f"{grammar_stem}.metaprompt.json")
         if not meta_path.exists():
             # Fallback to any metaprompt in directory if not a direct match
-            for p in grammar_path.parent.glob("*.metaprompt.json"):
+            for p in sorted(grammar_path.parent.glob("*.metaprompt.json")):
                 if p != meta_path:
                     meta_path = p
                     break
@@ -385,7 +384,7 @@ class PipelineExecutor:
 
 
         # Try to find raw response
-        grammar_hash = grammar_path.stem.replace('.tracery', '')
+        grammar_hash = grammar_stem
         raw_path = grammar_path.parent / f"{grammar_hash}.raw.txt"
         raw_response = raw_path.read_text() if raw_path.exists() else None
 

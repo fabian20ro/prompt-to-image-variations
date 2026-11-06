@@ -7,6 +7,8 @@ the codebase.
 
 import json
 import logging
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -227,9 +229,19 @@ class MetadataManager:
 
         meta_file = run_dir / f"{prefix}.metaprompt.json"
 
+        logger.info("Saving metadata to %s", str(meta_file))
+
         try:
             run_dir.mkdir(parents=True, exist_ok=True)
-            meta_file.write_text(json.dumps(data, indent=2))
+            fd, tmp_path = tempfile.mkstemp(prefix=f".{meta_file.name}.", dir=str(run_dir))
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_path, meta_file)
+            except BaseException:
+                if Path(tmp_path).exists():
+                    Path(tmp_path).unlink()
+                raise
             return meta_file
         except OSError as e:
             raise MetadataError(f"Failed to save metadata file: {e}")
@@ -260,12 +272,25 @@ class MetadataManager:
             # Apply updates
             for key, value in updates.items():
                 if value is not None:
-                    data[key] = value
+                    existing = data.get(key)
+                    if isinstance(existing, dict) and isinstance(value, dict):
+                        merged = {**existing, **value}
+                        data[key] = merged
+                    else:
+                        data[key] = value
                 elif key in data:
                     del data[key]
 
-            # Save back
-            meta_file.write_text(json.dumps(data, indent=2))
+            # Save back atomically (tempfile + os.replace) — matches save() pattern
+            fd, tmp_path = tempfile.mkstemp(prefix=f".{meta_file.name}.", dir=str(run_dir))
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_path, meta_file)
+            except BaseException:
+                if Path(tmp_path).exists():
+                    Path(tmp_path).unlink()
+                raise
             return RunMetadata.from_dict(data)
 
         except json.JSONDecodeError as e:

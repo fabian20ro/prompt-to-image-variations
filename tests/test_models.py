@@ -8,11 +8,65 @@ from server.models import (
     Task,
     QueueState,
     TaskProgress,
+    TaskResponse,
     GenerateRequest,
     GenerateFromGrammarRequest,
+    RegeneratePromptsRequest,
     EnhanceImageRequest,
+    GenerateImageRequest,
     GalleryLayoutUpdateRequest,
+    RegeneratePromptsApiRequest,
+    GenerateAllImagesRequest,
+    GrammarUpdateRequest,
+    EnhanceAllImagesRequest,
 )
+
+
+class TestRegeneratePromptsRequest:
+    """Tests for RegeneratePromptsRequest — internal queue model."""
+
+    def test_regenerate_prompts_request_defaults(self):
+        """Test RegeneratePromptsRequest with required fields only."""
+        req = RegeneratePromptsRequest(run_id="run-123", grammar='{"origin": ["x"]}')
+        assert req.run_id == "run-123"
+        assert req.grammar == '{"origin": ["x"]}'
+        assert req.count is None
+
+    def test_regenerate_prompts_request_count_unbounded(self):
+        """Test that count accepts any int including 0 and negative (no ge/le constraint)."""
+        # RegeneratePromptsRequest.count has no bounds — unlike RegeneratePromptsApiRequest.
+        req = RegeneratePromptsRequest(run_id="r", grammar='{"origin": ["x"]}', count=0)
+        assert req.count == 0
+
+        req = RegeneratePromptsRequest(run_id="r", grammar='{"origin": ["x"]}', count=-5)
+        assert req.count == -5
+
+        # None is allowed (default)
+        req_none = RegeneratePromptsRequest(run_id="r", grammar='{"origin": ["x"]}')
+        assert req_none.count is None
+
+    def test_regenerate_prompts_request_valid_fields(self):
+        """Test setting valid field values."""
+        from pydantic import ValidationError
+
+        req = RegeneratePromptsRequest(
+            run_id="run-abc",
+            grammar='{"origin": ["test"]}',
+            count=50,
+        )
+        assert req.run_id == "run-abc"
+        assert req.grammar == '{"origin": ["test"]}'
+        assert req.count == 50
+
+    def test_regenerate_prompts_request_extra_fields_accepted(self):
+        """Test that unknown fields are silently ignored (no forbid config)."""
+        from pydantic import ValidationError
+
+        # RegeneratePromptsRequest has no ConfigDict(extra="forbid") — extras dropped.
+        req = RegeneratePromptsRequest(
+            run_id="r", grammar='{"origin": ["x"]}', bogus_field=42
+        )
+        assert req.run_id == "r"
 
 
 class TestModels:
@@ -48,6 +102,18 @@ class TestModels:
         assert task.status == TaskStatus.PENDING
         assert task.pid is None
         assert task.params == {}
+        # Timestamps should default to None — critical for queue persistence
+        assert task.started_at is None
+        assert task.completed_at is None
+
+    def test_task_timestamps_accept_datetime(self):
+        """Test Task model timestamps accept datetime objects."""
+        from datetime import datetime
+
+        ts = datetime(2025, 1, 1, 12, 0, 0)
+        task = Task(id="t", type=TaskType.GENERATE_PIPELINE, started_at=ts)
+        assert task.started_at == ts
+        assert task.completed_at is None
 
     def test_task_progress(self):
         """Test TaskProgress model."""
@@ -105,8 +171,11 @@ class TestModels:
     def test_generate_request_rejects_removed_model_controls(self, legacy_field):
         from pydantic import ValidationError
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as exc_info:
             GenerateRequest(prompt="a cat", **{legacy_field: 4})
+
+        error = exc_info.value.errors()[0]
+        assert error["loc"][0] == legacy_field
 
     def test_generate_from_grammar_request_defaults(self):
         req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}')
@@ -117,6 +186,22 @@ class TestModels:
     def test_generate_from_grammar_request_allows_zero_images_per_prompt(self):
         req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=0)
         assert req.images_per_prompt == 0
+
+    def test_generate_from_grammar_title_max_length(self):
+        """Test that title respects max_length=500 on GenerateFromGrammarRequest."""
+        from pydantic import ValidationError
+
+        # Over limit: 501 characters
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', title="x" * 501)
+
+        # Boundary: exactly 500 is allowed (le=500 in Field)
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', title="y" * 500)
+        assert req.title == "y" * 500
+
+        # None remains the default
+        req_none = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}')
+        assert req_none.title is None
 
 
 class TestInputValidation:
@@ -135,6 +220,18 @@ class TestInputValidation:
 
         with pytest.raises(ValidationError):
             GenerateRequest(prompt="")
+
+    def test_generate_request_prompt_max_length(self):
+        """Test that prompt respects max_length=5000 on GenerateRequest."""
+        from pydantic import ValidationError
+
+        # Boundary: exactly 5000 is allowed
+        req = GenerateRequest(prompt="x" * 5000)
+        assert req.prompt == "x" * 5000
+
+        # Over limit: 5001 is rejected
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="x" * 5001)
 
     def test_generate_request_count_bounds(self):
         """Test that count must be within bounds."""
@@ -220,3 +317,580 @@ class TestInputValidation:
         # Just right
         req = EnhanceImageRequest(softness=0.7)
         assert req.softness == 0.7
+
+    def test_gallery_layout_images_per_prompt_lower_bound(self):
+        """Test that images_per_prompt cannot be negative on GalleryLayoutUpdateRequest."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GalleryLayoutUpdateRequest(images_per_prompt=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = GalleryLayoutUpdateRequest(images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
+    def test_gallery_layout_images_per_prompt_upper_bound(self):
+        """Test that images_per_prompt cannot exceed 100 on GalleryLayoutUpdateRequest."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GalleryLayoutUpdateRequest(images_per_prompt=101)
+
+        # Boundary: 100 is allowed (le=100)
+        req = GalleryLayoutUpdateRequest(images_per_prompt=100)
+        assert req.images_per_prompt == 100
+
+    def test_gallery_layout_max_prompts_lower_bound(self):
+        """Test that max_prompts must be >= 1 on GalleryLayoutUpdateRequest."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GalleryLayoutUpdateRequest(max_prompts=0)
+
+        # Just right
+        req = GalleryLayoutUpdateRequest(max_prompts=50)
+        assert req.max_prompts == 50
+
+
+class TestRegeneratePromptsApiRequest:
+    """Tests for RegeneratePromptsApiRequest model."""
+
+    def test_regenerate_prompts_api_request_defaults(self):
+        """Test all fields default to None (optional)."""
+        from pydantic import ValidationError
+
+        req = RegeneratePromptsApiRequest()
+        assert req.grammar is None
+        assert req.count is None
+        assert req.images_per_prompt is None
+        assert req.max_prompts is None
+
+    def test_regenerate_prompts_api_request_grammar_optional(self):
+        """Test grammar can be omitted (not required)."""
+        from pydantic import ValidationError
+
+        # No arguments at all — all fields should be None
+        req = RegeneratePromptsApiRequest()
+        assert req.grammar is None
+        # Grammar accepts empty string (no min_length constraint)
+        req_empty = RegeneratePromptsApiRequest(grammar="")
+        assert req_empty.grammar == ""
+
+    def test_regenerate_prompts_api_request_images_per_prompt_zero_boundary(self):
+        """Test that images_per_prompt=0 is allowed (ge=0)."""
+        from pydantic import ValidationError
+
+        # 0 is valid per ge=0 in the model definition
+        req = RegeneratePromptsApiRequest(images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
+    def test_regenerate_prompts_api_request_valid_fields(self):
+        """Test setting valid field values."""
+        from pydantic import ValidationError
+
+        req = RegeneratePromptsApiRequest(
+            grammar='{"origin": ["test"]}',
+            count=100,
+            images_per_prompt=5,
+            max_prompts=20,
+        )
+        assert req.grammar == '{"origin": ["test"]}'
+        assert req.count == 100
+        assert req.images_per_prompt == 5
+        assert req.max_prompts == 20
+
+    def test_regenerate_prompts_api_request_count_bounds(self):
+        """Test that count must be within bounds."""
+        from pydantic import ValidationError
+
+        # Too low
+        with pytest.raises(ValidationError):
+            RegeneratePromptsApiRequest(count=0)
+
+        # Too high
+        with pytest.raises(ValidationError):
+            RegeneratePromptsApiRequest(count=10001)
+
+        # Just right
+        req = RegeneratePromptsApiRequest(count=500)
+        assert req.count == 500
+
+    def test_regenerate_prompts_api_request_max_prompts_bounds(self):
+        """Test that max_prompts must be >= 1."""
+        from pydantic import ValidationError
+
+        # Too low (not allowed)
+        with pytest.raises(ValidationError):
+            RegeneratePromptsApiRequest(max_prompts=0)
+
+        # Just right
+        req = RegeneratePromptsApiRequest(max_prompts=50)
+        assert req.max_prompts == 50
+
+    def test_regenerate_prompts_api_request_images_per_prompt_lower_bound(self):
+        """Test that images_per_prompt cannot be negative."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            RegeneratePromptsApiRequest(images_per_prompt=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = RegeneratePromptsApiRequest(images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
+    def test_regenerate_prompts_api_request_images_per_prompt_upper_bound(self):
+        """Test that images_per_prompt cannot exceed 100."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            RegeneratePromptsApiRequest(images_per_prompt=101)
+
+        # Boundary: 100 is allowed (le=100)
+        req = RegeneratePromptsApiRequest(images_per_prompt=100)
+
+
+class TestExtraFieldHandling:
+    """Tests for which request models reject extra fields (extra='forbid')."""
+
+    def test_generate_request_rejects_extra_fields(self):
+        """GenerateRequest has ConfigDict(extra='forbid') — unknown fields rejected."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="a cat", unknown_field="should fail")
+
+    def test_generate_from_grammar_request_rejects_extra_fields(self):
+        """GenerateFromGrammarRequest has extra='forbid'."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', bogus="x")
+
+    def test_generate_all_images_request_rejects_extra_fields(self):
+        """GenerateAllImagesRequest has extra='forbid'."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(bogus_field=42)
+
+    def test_enhance_image_request_rejects_extra_fields(self):
+        """EnhanceImageRequest has extra='forbid' — unknown fields rejected."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(image_idx=0, bogus_field="should fail")
+
+    def test_grammar_update_request_rejects_extra_fields(self):
+        """GrammarUpdateRequest has extra='forbid' — unknown fields rejected."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GrammarUpdateRequest(grammar='{"origin":["x"]}', bogus=True)
+
+    def test_enhance_all_images_request_rejects_extra_fields(self):
+        """EnhanceAllImagesRequest has extra='forbid' — unknown fields rejected."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            EnhanceAllImagesRequest(softness=0.5, bogus_key="ignored")
+
+
+class TestGalleryLayoutUpdateRequest:
+    """Tests for GalleryLayoutUpdateRequest model defaults and validation."""
+
+    def test_gallery_layout_defaults(self):
+        """Test GalleryLayoutUpdateRequest with default values."""
+        from pydantic import ValidationError
+
+        req = GalleryLayoutUpdateRequest()
+        assert req.images_per_prompt == 1
+        assert req.max_prompts is None
+
+    def test_gallery_layout_max_prompts_upper_bound(self):
+        """Test that max_prompts upper bound is respected (no le= limit in model)."""
+        req = GalleryLayoutUpdateRequest(max_prompts=9999)
+        assert req.max_prompts == 9999
+
+
+class TestGenerateAllImagesRequest:
+    """Tests for GenerateAllImagesRequest field validation."""
+
+    def test_generate_all_images_defaults(self):
+        """Test GenerateAllImagesRequest with default values."""
+        from pydantic import ValidationError
+
+        req = GenerateAllImagesRequest()
+        assert req.images_per_prompt == 1
+        assert req.resume is True
+        assert req.width is None
+        assert req.height is None
+        assert req.enhance is False
+        assert req.enhance_softness == 0.5
+
+    def test_generate_all_images_dimensions_bounds(self):
+        """Test that width/height must be within bounds."""
+        from pydantic import ValidationError
+
+        # Too small
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(width=32)
+
+        # Too large
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(height=5000)
+
+        # Just right
+        req = GenerateAllImagesRequest(width=512, height=768)
+        assert req.width == 512
+        assert req.height == 768
+
+    def test_generate_all_images_seed_validation(self):
+        """Test that seed must be non-negative."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(seed=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = GenerateAllImagesRequest(seed=0)
+        assert req.seed == 0
+
+    def test_generate_all_images_enhance_softness_bounds(self):
+        """Test that enhance_softness must be within 0-1."""
+        from pydantic import ValidationError
+
+        # Too low
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(enhance_softness=-0.1)
+
+        # Too high
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(enhance_softness=1.5)
+
+        # Just right
+        req = GenerateAllImagesRequest(enhance_softness=0.7)
+        assert req.enhance_softness == 0.7
+
+    def test_generate_all_images_images_per_prompt_bounds(self):
+        """Test that images_per_prompt must be within bounds."""
+        from pydantic import ValidationError
+
+        # Too low (ge=0, so -1 should fail)
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(images_per_prompt=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = GenerateAllImagesRequest(images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
+        # Too high
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(images_per_prompt=101)
+
+    def test_generate_all_images_max_prompts_lower_bound(self):
+        """Test that max_prompts must be >= 1."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateAllImagesRequest(max_prompts=0)
+
+        # Just right
+        req = GenerateAllImagesRequest(max_prompts=50)
+        assert req.max_prompts == 50
+
+    def test_generate_all_images_max_prompts_upper_bound(self):
+        """Test that max_prompts upper bound is respected (no le= limit in model)."""
+        req = GenerateAllImagesRequest(max_prompts=9999)
+        assert req.max_prompts == 9999
+
+
+class TestGenerateImageRequest:
+    """Tests for GenerateImageRequest image_idx validation."""
+
+    def test_generate_image_request_defaults(self):
+        """Test GenerateImageRequest with default values."""
+        from pydantic import ValidationError
+
+        req = GenerateImageRequest()
+        assert req.image_idx == 0
+
+    def test_generate_image_request_low_bound_rejection(self):
+        """Test that image_idx cannot be negative."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateImageRequest(image_idx=-1)
+
+    def test_generate_image_request_high_bound_rejection(self):
+        """Test that image_idx cannot exceed 1000."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateImageRequest(image_idx=1001)
+
+    def test_generate_image_request_boundary_acceptance(self):
+        """Test boundary values are accepted (0 and 1000)."""
+        req = GenerateImageRequest(image_idx=0)
+        assert req.image_idx == 0
+
+        req = GenerateImageRequest(image_idx=1000)
+        assert req.image_idx == 1000
+
+
+class TestEnhanceAllImagesRequest:
+    """Tests for EnhanceAllImagesRequest softness validation."""
+
+    def test_enhance_all_images_request_defaults(self):
+        """Test EnhanceAllImagesRequest with default values."""
+        from pydantic import ValidationError
+
+        req = EnhanceAllImagesRequest()
+        assert req.softness == 0.5
+
+    def test_enhance_all_images_request_softness_bounds(self):
+        """Test that softness must be within 0-1."""
+        from pydantic import ValidationError
+
+        # Too low
+        with pytest.raises(ValidationError):
+            EnhanceAllImagesRequest(softness=-0.1)
+
+        # Too high
+        with pytest.raises(ValidationError):
+            EnhanceAllImagesRequest(softness=1.5)
+
+        # Just right
+        req = EnhanceAllImagesRequest(softness=0.7)
+        assert req.softness == 0.7
+
+
+class TestGenerateFromGrammarRequestValidation:
+    """Tests for GenerateFromGrammarRequest field validation."""
+
+    def test_generate_from_grammar_request_images_per_prompt_bounds(self):
+        """Test that images_per_prompt must be within 0-100 (ge=0, le=100)."""
+        from pydantic import ValidationError
+
+        # Below lower bound (ge=0, so -1 should fail)
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=-1)
+
+        # Boundary: 0 is allowed (ge=0)
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=0)
+        assert req.images_per_prompt == 0
+
+        # Above upper bound
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', images_per_prompt=101)
+
+    def test_generate_from_grammar_request_dimensions_min_bound(self):
+        """Test that width/height reject values below 64."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', width=32)
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', height=32)
+
+        # Boundary: 64 is allowed (ge=64)
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', width=64, height=64)
+        assert req.width == 64
+        assert req.height == 64
+
+    def test_generate_from_grammar_request_seed_negative_rejected(self):
+        """Test that negative seed is rejected (ge=0)."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', seed=-1)
+
+        # Boundary: 0 allowed, None default works
+        req = GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', seed=0)
+        assert req.seed == 0
+
+    def test_generate_from_grammar_request_extra_fields_rejected(self):
+        """Test that extra fields are rejected (ConfigDict(extra='forbid'))."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', bogus_field="should fail")
+
+    def test_generate_from_grammar_request_prefix_pattern(self):
+        """Test that prefix must match allowed pattern on GenerateFromGrammarRequest."""
+        from pydantic import ValidationError
+
+        # Valid prefixes (alphanumeric, hyphens, underscores)
+        GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="image")
+        GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="my-prefix")
+        GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="prefix_123")
+
+        # Invalid prefixes (spaces, dots)
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="prefix with spaces")
+
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar='{"origin": ["test"]}', prefix="prefix.with.dots")
+
+
+class TestGenerateImageRequestExtraFields:
+    """Tests for GenerateImageRequest extra field handling (no forbid config)."""
+
+    def test_generate_image_request_ignores_extra_fields(self):
+        """Test that unknown fields are silently ignored (default Pydantic behavior)."""
+        from pydantic import ValidationError
+
+        # Verify no error is raised when extra fields are passed — GenerateImageRequest
+        # has no ConfigDict(extra="forbid"), so extras should be dropped without validation.
+        # Confirm: extras accepted without raising
+        req = GenerateImageRequest(bogus_field="should not raise", image_idx=0)
+        assert req.image_idx == 0
+
+        # Also confirm a known-valid field still works normally
+        req2 = GenerateImageRequest(image_idx=0, bogus_field="should be ignored")
+        assert req2.image_idx == 0
+        # Extra fields are silently dropped — no error raised
+
+
+class TestGenerateImageRequestBoundaries:
+    """Tests for GenerateImageRequest image_idx bounds (ge=0, le=1000)."""
+
+    def test_generate_image_request_default_image_idx(self):
+        req = GenerateImageRequest()
+        assert req.image_idx == 0
+
+    def test_generate_image_request_image_idx_zero_boundary(self):
+        from pydantic import ValidationError
+
+        # Zero is allowed (ge=0)
+        req = GenerateImageRequest(image_idx=0)
+        assert req.image_idx == 0
+
+        # Negative rejected
+        with pytest.raises(ValidationError):
+            GenerateImageRequest(image_idx=-1)
+
+    def test_generate_image_request_image_idx_upper_boundary(self):
+        from pydantic import ValidationError
+
+        # Upper boundary (le=1000) is allowed
+        req = GenerateImageRequest(image_idx=1000)
+        assert req.image_idx == 1000
+
+        # Over limit rejected
+        with pytest.raises(ValidationError):
+            GenerateImageRequest(image_idx=1001)
+
+
+class TestEnhanceImageRequestBoundaries:
+    """Tests for EnhanceImageRequest image_idx and softness bounds."""
+
+    def test_enhance_image_request_default_values(self):
+        req = EnhanceImageRequest()
+        assert req.image_idx == 0
+        assert req.softness == 0.5
+
+    def test_enhance_image_request_image_idx_boundaries(self):
+        from pydantic import ValidationError
+
+        # Lower boundary (ge=0)
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(image_idx=-1)
+
+        req = EnhanceImageRequest(image_idx=0)
+        assert req.image_idx == 0
+
+        # Upper boundary (le=1000)
+        req = EnhanceImageRequest(image_idx=1000)
+        assert req.image_idx == 1000
+
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(image_idx=1001)
+
+    def test_enhance_image_request_softness_boundaries(self):
+        from pydantic import ValidationError
+
+        # Lower boundary (ge=0.0)
+        req = EnhanceImageRequest(softness=0.0)
+        assert req.softness == 0.0
+
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(softness=-0.01)
+
+        # Upper boundary (le=1.0)
+        req = EnhanceImageRequest(softness=1.0)
+        assert req.softness == 1.0
+
+        with pytest.raises(ValidationError):
+            EnhanceImageRequest(softness=1.01)
+
+
+class TestSeedValidation:
+    """Tests for GenerateRequest seed constraint (ge=0)."""
+
+    def test_seed_zero_is_valid(self):
+        from pydantic import ValidationError
+
+        req = GenerateRequest(prompt="test", seed=0)
+        assert req.seed == 0
+
+    def test_seed_negative_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", seed=-1)
+
+    def test_seed_default_is_none(self):
+        req = GenerateRequest(prompt="test")
+        assert req.seed is None
+
+
+class TestGenerateRequestImagesPerPrompt:
+    """Tests for GenerateRequest images_per_prompt constraint (ge=1, le=100)."""
+
+    def test_images_per_prompt_default(self):
+        req = GenerateRequest(prompt="test")
+        assert req.images_per_prompt == 1
+
+    def test_images_per_prompt_zero_rejected(self):
+        """GenerateRequest uses ge=1 — unlike GenerateAllImagesRequest where 0 is valid."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", images_per_prompt=0)
+
+    def test_images_per_prompt_upper_bound(self):
+        from pydantic import ValidationError
+
+        # Boundary: 100 is allowed (le=100)
+        req = GenerateRequest(prompt="test", images_per_prompt=100)
+        assert req.images_per_prompt == 100
+
+        # Above upper bound
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", images_per_prompt=101)
+
+
+class TestGenerateRequestMaxPrompts:
+    """Tests for GenerateRequest max_prompts constraint (ge=1)."""
+
+    def test_max_prompts_default_is_none(self):
+        req = GenerateRequest(prompt="test")
+        assert req.max_prompts is None
+
+    def test_max_prompts_zero_rejected(self):
+        """GenerateRequest.max_prompts uses ge=1 — 0 must be rejected."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", max_prompts=0)
+
+    def test_max_prompts_negative_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GenerateRequest(prompt="test", max_prompts=-1)
+
+    def test_max_prompts_valid(self):
+        req = GenerateRequest(prompt="test", max_prompts=50)
+        assert req.max_prompts == 50

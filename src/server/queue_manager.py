@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 from typing import Callable
 
 from .models import QueueState, Task, TaskStatus, TaskType, TaskProgress
@@ -21,7 +21,10 @@ class QueueManager:
             queue_path: Path to the queue.
         """
         self.queue_path = queue_path
-        self._lock = Lock()
+        # Reentrant lock: _notify() runs listeners while the lock is held, and
+        # a listener may legitimately re-enter the public API (e.g. remove
+        # itself, or call get_state) from inside its own callback.
+        self._lock = RLock()
         self._state = self._load_state()
         self._listeners: list[Callable[[str, dict], None]] = []
 
@@ -155,6 +158,11 @@ class QueueManager:
         Args:
             task_id: ID of the task
             pid: Process ID of the worker subprocess
+
+        If ``task_id`` does not match the current task (or there is no current
+        task), this method is a no-op — no state mutation and no notification
+        event are emitted. This guarantees deterministic behavior when callers
+        dispatch PID updates to arbitrary ids without prior lookup.
         """
         with self._lock:
             state = self._state
@@ -311,6 +319,27 @@ class QueueManager:
             "run_id": run_id,
             "path": path,
         })
+
+    def get_task(self, task_id: str) -> Task | None:
+        """Find and return any task by id (pending / current / completed).
+
+        Args:
+            task_id: ID of the task to look up
+
+        Returns:
+            The matching task, or None if not found.
+        """
+        with self._lock:
+            state = self._state
+            for t in state.pending:
+                if t.id == task_id:
+                    return t
+            if state.current_task and state.current_task.id == task_id:
+                return state.current_task
+            for t in state.completed[:]:
+                if t.id == task_id:
+                    return t
+            return None
 
     def emit_log(self, task_id: str, message: str) -> None:
         """Emit a log line from the worker subprocess.

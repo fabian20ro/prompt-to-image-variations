@@ -17,15 +17,17 @@ from .queue_manager import QueueManager
 class Worker:
     """Background worker that processes tasks from the queue."""
 
-    def __init__(self, queue_manager: QueueManager, generated_dir: Path):
+    def __init__(self, queue_manager: QueueManager, generated_dir: Path, task_timeout: float = 1800.0):
         """Initialize the worker.
 
         Args:
             queue_manager: Queue manager instance
             generated_dir: Path to generated/ directory
+            task_timeout: Max seconds allowed per task (default 30 minutes)
         """
         self.queue_manager = queue_manager
         self.generated_dir = generated_dir
+        self.task_timeout = task_timeout
         self._running = False
         self._current_process: asyncio.subprocess.Process | None = None
         self._worker_script = Path(__file__).parent / "worker_subprocess.py"
@@ -119,11 +121,36 @@ class Worker:
         return stderr_lines
 
     async def _execute_task(self, task):
-        """Execute a single task.
+        """Execute a single task with an overall timeout.
 
         Args:
             task: Task to execute
         """
+        try:
+            await asyncio.wait_for(
+                self._run_task_inner(task),
+                timeout=self.task_timeout,
+            )
+        except asyncio.TimeoutError:
+            if self._current_process:
+                try:
+                    self._current_process.terminate()
+                    await asyncio.wait_for(self._current_process.wait(), timeout=5.0)
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    # Force kill if graceful termination did not complete
+                    try:
+                        self._current_process.kill()
+                        await asyncio.wait_for(
+                            self._current_process.wait(), timeout=2.0
+                        )
+                    except Exception:
+                        pass  # best-effort cleanup; task already failed
+            self.queue_manager.fail_task(
+                task.id, f"Task exceeded timeout of {self.task_timeout:.0f}s"
+            )
+
+    async def _run_task_inner(self, task):
+        """Inner execution loop for a single task. Called inside wait_for."""
         # Create temp file for task params
         with tempfile.NamedTemporaryFile(
             mode='w',

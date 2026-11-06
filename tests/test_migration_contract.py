@@ -8,6 +8,38 @@ from grammar_generator import generate_grammar
 from tracery_runner import run_tracery
 
 
+def test_standalone_cli_enhances_with_real_progressbar(monkeypatch, tmp_path):
+    import sys
+    import shutil
+    from types import SimpleNamespace
+    from click.testing import CliRunner
+    from PIL import Image
+    from cli import main
+    from image_enhancer import clear_enhancer_cache
+
+    source = tmp_path / "teapot.png"
+    Image.new("RGB", (16, 16)).save(source)
+    class SeedVR2:
+        def __init__(self, **kwargs):
+            pass
+
+        def generate_image(self, **kwargs):
+            return SimpleNamespace(save=lambda path, overwrite: Image.new("RGB", (32, 32)).save(path))
+
+    monkeypatch.setitem(sys.modules, "mflux.models.seedvr2.variants.upscale.seedvr2", SimpleNamespace(SeedVR2=SeedVR2))
+    monkeypatch.setitem(sys.modules, "mflux.utils.scale_factor", SimpleNamespace(ScaleFactor=lambda value: value))
+    original_which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda command: "/fake/lms" if command == "lms" else original_which(command))
+    monkeypatch.setattr("subprocess.run", Mock(return_value=SimpleNamespace(returncode=0)))
+    clear_enhancer_cache()
+    try:
+        result = CliRunner().invoke(main, ["--enhance-images", str(source), "--seed", "42"])
+        assert result.exit_code == 0, result.output
+        assert Image.open(source).size == (32, 32)
+    finally:
+        clear_enhancer_cache()
+
+
 def test_escaped_backslash_does_not_hide_a_tracery_action():
     from tracery_runner import TraceryError
     grammar = {"origin": [r"\\[color:red\\]#color#"], "color": ["blue"]}

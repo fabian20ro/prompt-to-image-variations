@@ -111,11 +111,16 @@ def generate_image(
     prompt: str,
     output_path: Path,
     seed: int | None = None,
-    width: int = 864,
-    height: int = 1152,
+    width: int | None = None,
+    height: int | None = None,
 ) -> Path:
     """Generate one image with fixed distilled FLUX 3 q4 settings."""
+    width = width if width is not None else settings.image_generation.default_width
+    height = height if height is not None else settings.image_generation.default_height
     validate_dimensions(width, height)
+
+    if seed is not None and seed < 0:
+        raise ValueError(f"Seed must be non-negative, got {seed}.")
 
     if seed is None:
         seed = random.randint(0, 2**32 - 1)
@@ -123,6 +128,7 @@ def generate_image(
     validate_checkpoint()
     from image_enhancer import clear_enhancer_cache
     clear_enhancer_cache()
+    logger.info("Generating image with seed %d", seed)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     unload_all_models()
     model = _get_model()
@@ -138,4 +144,7 @@ def generate_image(
         **generation_settings(), "seed": seed, "prompt": prompt,
         "width": width, "height": height,
     }, indent=2, ensure_ascii=False))
+    logger.info(
+        "Image saved to %s (%dx%d, seed %d)", output_path, width, height, seed
+    )
     return output_path

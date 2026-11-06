@@ -18,13 +18,15 @@ Status: **hardware acceptance passed; approved FLUX source-cache cleanup complet
 
 Matt Pocock TDD workflow: red→green vertical slices at the user-approved grammar/expansion, image/enhancement, pipeline/artifact and CLI/API seams. External inference/process boundaries mocked; hardware checks separate.
 
-- `UV_CACHE_DIR=/tmp/uv-cache uv run --no-sync pytest -q`: **375 passed** after final review fixes. One upstream Starlette/AnyIO deprecation warning.
+- Latest merged suite: **1118 passed** on Python **3.11.16** and **3.13.15**, each in a clean `uv sync --locked --group dev` environment without optional image packages. One upstream Starlette/AnyIO deprecation warning. The pre-merge migration suite had 375 passes.
 - `uv run ruff check src tests scripts/verify_flux3.py`: passed.
 - `uv pip check`: 72 packages compatible. `git diff --check`: passed.
 - Repository-wide `ruff check .` also visits pre-existing scratch scripts (`test_new_logic.py`, `test_scratch.py`) containing Python 3.12-only f-string syntax; those are outside the configured CI lint scope and remain unchanged.
 - Browser: fixed grammar import, cyclic edit rejection without destructive save, successful caption regeneration, prompt-only gallery showing 0/0 images. Evidence run: `generated/prompts/20261107_002605_50da405c4032`.
 
 Final two-axis code review found one Standards issue (inconsistent escape/reference parsing) and one Spec issue (repeated quoted literals double-escaped). Both reproduced at public seams, fixed red→green, and independently rechecked. The validator now shares one escape-aware reference graph; literal protection uses one longest-match pass, preserving already-escaped and overlapping wording. All 23 accepted corpus grammars and both hardware-run grammars were replayed successfully after these fixes. GPU checks above/below used the preceding grammar implementation; renderer and model lifecycle code were unchanged by review.
+
+Merge with `master` (`74adfd0`): retained seeded Tracery expansion, CLI listing/JSON/config features, configuration/path validation, worker/gallery fixes and compatible new coverage. Kept fixed 2× SeedVR2: the pinned runtime does not accept master's width/height overrides. Retired only superseded ERNIE/private-cache, dead pipeline-config and unsupported enhancer-dimension tests; adapted remaining fixtures to FLUX validation. A real-progressbar CLI regression exposed `ProgressBar.write` (unsupported by Click), fixed test-first to `click.echo`. Lock consistency, Ruff and whitespace checks pass; saved corpus/hardware grammars replay after the merge. Real GPU inference was not repeated for this merge; hardware timings below remain the earlier observations.
 
 ## Real-model evidence
 

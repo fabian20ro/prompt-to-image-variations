@@ -47,8 +47,21 @@ def append_grammar_revision(
     prefix: str,
     grammar: str,
     action: str,
+    max_revisions: int = 100,
 ) -> list[dict]:
-    """Append a revision if the grammar changed or action is new."""
+    """Append a revision if the grammar changed or action is new.
+
+    Args:
+        run_dir: Directory where history files are stored.
+        prefix: Filename prefix for history and grammar files.
+        grammar: The grammar string to record as a revision.
+        action: Semantic label for this revision (e.g. "initial", "update").
+        max_revisions: Trim the history to this many recent entries when saving.
+            Defaults to 100 to cap disk usage in long sessions.
+
+    Returns:
+        The updated history list.
+    """
     if not grammar.strip():
         return load_grammar_history(run_dir, prefix)
     history_path = _history_path(run_dir, prefix)
@@ -56,8 +69,6 @@ def append_grammar_revision(
     history = load_grammar_history(run_dir, prefix)
     last = history[-1] if history else None
     if last and last.get("grammar", "").strip() == grammar.strip() and last.get("action") == action:
-        if not history_exists:
-            save_grammar_history(run_dir, prefix, history)
         return history
 
     history.append({
@@ -66,5 +77,40 @@ def append_grammar_revision(
         "action": action,
         "grammar": grammar,
     })
+    if max_revisions and len(history) > max_revisions:
+        history = history[-max_revisions:]
     save_grammar_history(run_dir, prefix, history)
     return history
+
+
+def get_recent_revisions(
+    history: list[dict], n: int = 10, *, include_action: bool | None = False,
+    action_filter: str | None = None,
+) -> list[dict]:
+    """Return the last ``n`` entries from ``history``.
+
+    Args:
+        history: The full grammar-history list (not mutated).
+        n: Number of recent entries to return. Defaults to 10. Pass ``0`` or a
+            negative value to receive a shallow copy of the entire history.
+        include_action: When True, each returned entry is reduced to only its
+            ``action`` key; when False (default), full entries are returned.
+        action_filter: Optional filter — only entries whose ``action`` field equals
+            this string are included in the result. A non-matching value returns an
+            empty list. Defaults to ``None`` (no filtering).
+
+    Returns:
+        A new list containing at most ``n`` recent revisions (or all entries).
+    """
+    if n <= 0:
+        result = list(history)
+    else:
+        result = history[-n:]
+
+    if action_filter is not None and isinstance(result, list):
+        result = [e for e in result if e.get("action") == action_filter]
+
+    if include_action and isinstance(result, list):
+        return [{"action": e.get("action")} for e in result]
+
+    return result

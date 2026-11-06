@@ -25,9 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 def _api_root(base_url: str) -> str:
-    """Convert the OpenAI-compatible base URL to LM Studio's server root."""
+    """Convert the OpenAI-compatible base URL to LM Studio's server root.
+
+    Strips trailing slashes, ``/v1`` suffix, and any remaining trailing slash so
+    callers can safely append ``/api/v1/...`` paths without producing double-slashes
+    (e.g. input ``http://host//v1`` must not yield ``http://host/``).
+    """
     root = base_url.rstrip("/")
-    return root[:-3] if root.endswith("/v1") else root
+    root = root[:-3] if root.endswith("/v1") else root
+    return root.rstrip("/")
 
 
 def ensure_lm_model_loaded(base_url: str, timeout: float = 180.0) -> None:
@@ -189,7 +195,13 @@ def generate_grammar(
 
     Returns:
         Tuple of (grammar content, was_cached, raw_response)
+
+    Raises:
+        ValueError: If user_prompt is empty or whitespace-only
     """
+    if not user_prompt.strip():
+        raise ValueError("User prompt must not be empty")
+
     prompt_hash = hash_prompt(user_prompt, width, height, temperature)
 
     # Check cache first
@@ -274,10 +286,16 @@ def validate_grammar_structure(grammar: object, require_variation: bool = True) 
     if len(grammar) > 8:
         raise ValueError("Grammar must contain at most 8 rules")
 
+    _RULE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     varying_rules = 0
     for name, options in grammar.items():
         if not isinstance(name, str) or not isinstance(options, list) or not options:
             raise ValueError(f"Grammar rule {name!r} must be a non-empty array")
+        if not _RULE_NAME_RE.match(name):
+            raise ValueError(
+                f"Grammar rule name {name!r} is invalid; "
+                f"rule names must match [A-Za-z_][A-Za-z0-9_]*"
+            )
         if not all(isinstance(option, str) and option.strip() for option in options):
             raise ValueError(f"Grammar rule {name!r} must contain non-empty strings")
         if len(set(options)) != len(options):
@@ -346,9 +364,22 @@ def clean_grammar_output(grammar: str) -> str:
 
     # Remove markdown code blocks and extract content
     # Handle ```json, ```tracery, or plain ``` markers (with or without newline)
-    code_block_match = re.search(r'```(?:json|tracery)?\s*(.*?)```', grammar, flags=re.DOTALL | re.IGNORECASE)
-    if code_block_match:
-        grammar = code_block_match.group(1)
+    code_block_matches = re.findall(r'```(?:json|tracery)?\s*(.*?)```', grammar, flags=re.DOTALL | re.IGNORECASE)
+
+    if len(code_block_matches) == 1:
+        grammar = code_block_matches[0]
+    elif code_block_matches:
+        # Try each extracted block; return the first one that parses as valid JSON.
+        for candidate in code_block_matches:
+            try:
+                json.loads(candidate.strip())
+                grammar = candidate
+                break
+            except (json.JSONDecodeError, ValueError):
+                continue
+        else:
+            # No block parsed — fall back to the last extracted block (best effort)
+            grammar = code_block_matches[-1]
 
     grammar = grammar.strip()
 

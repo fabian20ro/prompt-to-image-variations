@@ -60,12 +60,14 @@ def log_to_file(message: str) -> None:
 
 def emit_progress(stage: str, current: int = 0, total: int = 0, message: str = ""):
     """Emit progress update to stdout."""
+    percent = round(current / total * 100) if total else 0
     data = {
         "type": "progress",
         "stage": stage,
         "current": current,
         "total": total,
         "message": message,
+        "percent": percent,
     }
     print(json.dumps(data), flush=True)
     if message:
@@ -115,7 +117,15 @@ class Heartbeat:
     def _heartbeat_loop(self):
         """Emit heartbeat every interval seconds until stopped."""
         while not self._stop_event.wait(timeout=self.interval):
-            emit_progress("heartbeat", 0, 0, self.message)
+            try:
+                emit_progress("heartbeat", 0, 0, self.message)
+            except Exception as exc:
+                log_to_file(
+                    "Heartbeat stopped after progress emission failed: "
+                    f"{type(exc).__name__}"
+                )
+                self._stop_event.set()
+                break
 
     def __enter__(self):
         """Start the heartbeat thread."""
@@ -476,18 +486,17 @@ def run_delete_gallery(params: dict):
         emit_result(False, error=f"Gallery not found: {run_id}")
         return
 
-    emit_progress("deleting", 0, 1, f"Deleting gallery: {run_id}")
-
-    try:
-        # Delete the directory
-        delete_run(output_dir, paths.prompts_dir)
-    except ValueError as e:
-        # delete_run raises ValueError for validation errors (not in prompts_dir, is archive, etc.)
-        emit_result(False, error=str(e))
-        return
-    except OSError as e:
-        emit_result(False, error=f"Failed to delete gallery: {e}")
-        return
+    with Heartbeat(f"Deleting gallery: {run_id}"):
+        try:
+            # Delete the directory
+            delete_run(output_dir, paths.prompts_dir)
+        except ValueError as e:
+            # delete_run raises ValueError for validation errors (not in prompts_dir, is archive, etc.)
+            emit_result(False, error=str(e))
+            sys.exit(1)
+        except OSError as e:
+            emit_result(False, error=f"Failed to delete gallery: {e}")
+            sys.exit(1)
 
     # Regenerate master index - best effort, don't fail if this fails
     try:
@@ -528,6 +537,10 @@ def main():
 
     task_type = task.get("type")
     params = task.get("params", {})
+
+    if task_type is None:
+        emit_result(False, error="Missing 'type' field in task JSON")
+        sys.exit(1)
 
     handler = TASK_HANDLERS.get(task_type)
     if handler is None:

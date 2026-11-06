@@ -10,6 +10,7 @@ from PIL import Image
 
 from image_enhancer import (
     clear_enhancer_cache,
+    enhancer_is_loaded,
     _get_enhancer,
     _enhancer_cache,
     enhance_image,
@@ -36,6 +37,48 @@ class TestEnhancerCache:
             mock_gc.assert_called_once()
 
 
+class TestEnhancerIsLoaded:
+    """Tests for the enhancer warm-state query."""
+
+    def teardown_method(self):
+        """Clear cache after each test."""
+        clear_enhancer_cache()
+
+    def test_is_loaded_fresh_cache(self):
+        """Enhancer reports unloaded on a fresh (empty) cache."""
+        clear_enhancer_cache()
+        assert enhancer_is_loaded() is False
+        assert enhancer_is_loaded(tiled_vae=True) is False
+
+    def test_is_loaded_true_after_get_enhancer(self):
+        """Enhancer reports loaded once _get_enhancer has populated the cache."""
+        assert enhancer_is_loaded() is False
+        assert enhancer_is_loaded(tiled_vae=True) is False
+
+        mock_instance = MagicMock()
+        module_seedvr2 = ModuleType("mflux.models.seedvr2.variants.upscale.seedvr2")
+        module_seedvr2.SeedVR2 = MagicMock(return_value=mock_instance)
+
+        with patch.dict(sys.modules, {
+            "mflux.models.seedvr2.variants.upscale.seedvr2": module_seedvr2,
+        }):
+            _get_enhancer(tiled_vae=True)
+
+        assert enhancer_is_loaded(tiled_vae=True) is True
+        assert enhancer_is_loaded() is False
+
+    def test_is_loaded_false_after_clear(self):
+        """Enhancer reports unloaded after clear_enhancer_cache()."""
+        _enhancer_cache[False] = MagicMock()
+        _enhancer_cache[True] = MagicMock()
+        assert enhancer_is_loaded() is True
+        assert enhancer_is_loaded(tiled_vae=True) is True
+
+        clear_enhancer_cache()
+        assert enhancer_is_loaded() is False
+        assert enhancer_is_loaded(tiled_vae=True) is False
+
+
 class TestGetEnhancer:
     """Tests for enhancer instantiation."""
 
@@ -50,6 +93,14 @@ class TestGetEnhancer:
         _enhancer_cache[cache_key] = mock_enhancer
 
         result = _get_enhancer(tiled_vae=True)
+        assert result is mock_enhancer
+
+    def test_get_enhancer_cache_hit_default_false(self):
+        """Test that cached enhancers are reused on the default tiled_vae=False path."""
+        mock_enhancer = MagicMock()
+        _enhancer_cache[False] = mock_enhancer
+
+        result = _get_enhancer(tiled_vae=False)
         assert result is mock_enhancer
 
     def test_get_enhancer_mflux_not_installed(self):
@@ -90,6 +141,40 @@ class TestGetEnhancer:
             result = _get_enhancer(tiled_vae=False)
 
         assert result.tiling_config is None
+
+    @patch("image_enhancer._enhancer_cache", {})
+    def test_get_enhancer_default_no_args(self):
+        """Test the default no-args path: quantize=8 and tiling disabled."""
+        mock_instance = MagicMock()
+        mock_instance.tiling_config = MagicMock()
+
+        module_seedvr2 = ModuleType("mflux.models.seedvr2.variants.upscale.seedvr2")
+        module_seedvr2.SeedVR2 = MagicMock(return_value=mock_instance)
+
+        with patch.dict(sys.modules, {
+            "mflux.models.seedvr2.variants.upscale.seedvr2": module_seedvr2,
+        }):
+            result = _get_enhancer()
+
+        module_seedvr2.SeedVR2.assert_called_once_with(quantize=8)
+        assert result.tiling_config is None
+
+    @patch("image_enhancer._enhancer_cache", {})
+    def test_get_enhancer_preserves_tiling_when_enabled(self):
+        """Test that tiled_vae=True preserves the default tiling config."""
+        mock_instance = MagicMock()
+        original_tiling = MagicMock()
+        mock_instance.tiling_config = original_tiling
+
+        module_seedvr2 = ModuleType("mflux.models.seedvr2.variants.upscale.seedvr2")
+        module_seedvr2.SeedVR2 = MagicMock(return_value=mock_instance)
+
+        with patch.dict(sys.modules, {
+            "mflux.models.seedvr2.variants.upscale.seedvr2": module_seedvr2,
+        }):
+            result = _get_enhancer(tiled_vae=True)
+
+        assert result.tiling_config is original_tiling
 
 
 class TestEnhanceImage:
@@ -140,6 +225,8 @@ class TestEnhanceImage:
         assert call_kwargs["softness"] == 0.7
         assert call_kwargs["image_path"] == str(image_path)
         mock_result.save.assert_called_once_with(path=str(output_path), overwrite=True)
+        # Verify resolution is always ScaleFactor(2) for 2x upscaling (line 116 of image_enhancer.py)
+        mock_scale_factor.assert_called_once_with(2)
 
     @patch("image_enhancer._get_enhancer")
     @patch("image_enhancer.unload_all_models")
@@ -180,6 +267,47 @@ class TestEnhanceImage:
             enhance_image(image_path=image_path, output_path=output_path)
 
         assert output_path.parent.exists()
+
+    @patch("image_enhancer._get_enhancer")
+    @patch("image_enhancer.unload_all_models")
+    def test_enhance_image_forwards_tiled_vae(self, _mock_unload, mock_get_enhancer, temp_dir):
+        """The tiled_vae request is threaded to _get_enhancer to select the right enhancer."""
+        img = Image.new("RGB", (10, 10))
+        image_path = temp_dir / "test.png"
+        img.save(image_path)
+        output_path = temp_dir / "enhanced.png"
+
+        mock_enhancer = MagicMock()
+        mock_enhancer.generate_image.return_value = MagicMock()
+        mock_get_enhancer.return_value = mock_enhancer
+
+        with patch.dict(sys.modules, {
+            "mflux.utils.scale_factor": MagicMock(),
+        }):
+            enhance_image(image_path=image_path, output_path=output_path, tiled_vae=True)
+
+        # Production calls _get_enhancer positionally: _get_enhancer(tiled_vae)
+        mock_get_enhancer.assert_called_once_with(True)
+
+    @patch("image_enhancer._get_enhancer")
+    @patch("image_enhancer.unload_all_models")
+    def test_enhance_image_default_tiled_vae_false(self, _mock_unload, mock_get_enhancer, temp_dir):
+        """By default (no tiled_vae arg) the non-tiled enhancer is requested."""
+        img = Image.new("RGB", (10, 10))
+        image_path = temp_dir / "test.png"
+        img.save(image_path)
+        output_path = temp_dir / "enhanced.png"
+
+        mock_enhancer = MagicMock()
+        mock_enhancer.generate_image.return_value = MagicMock()
+        mock_get_enhancer.return_value = mock_enhancer
+
+        with patch.dict(sys.modules, {
+            "mflux.utils.scale_factor": MagicMock(),
+        }):
+            enhance_image(image_path=image_path, output_path=output_path)
+
+        mock_get_enhancer.assert_called_once_with(False)
 
 
 class TestCollectImages:
@@ -246,6 +374,54 @@ class TestCollectImages:
         with pytest.raises(ValueError, match="No images found matching pattern"):
             collect_images(str(temp_dir / "*.xyz"))
 
+    def test_collect_uppercase_extensions(self, temp_dir):
+        """Test that uppercase image extensions are detected in all code paths."""
+        img = Image.new("RGB", (10, 10))
+        png_path = temp_dir / "test.PNG"
+        jpg_path = temp_dir / "photo.JPG"
+        webp_path = temp_dir / "image.WEBP"
+        img.save(png_path)
+        img.save(jpg_path)
+        img.save(webp_path)
+
+        # Single file path
+        assert collect_images(str(png_path)) == [png_path]
+
+        # Directory scan - verifies case-insensitive glob in production code (line 159-160)
+        result = collect_images(str(temp_dir))
+        names = {r.name for r in result}
+        assert "test.PNG" in names
+        assert "photo.JPG" in names
+        assert "image.WEBP" in names
+
+        # Glob pattern with uppercase extension - exercises the .upper() normalization (line 169)
+        result = collect_images(str(temp_dir / "*.PNG"))
+        assert len(result) == 1
+        assert result[0] == png_path
+
+
+def test_enhance_image_scale_factor_missing_raises_import_error(temp_dir):
+    """Test that missing ScaleFactor triggers install-hint ImportError."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+
+    img = Image.new("RGB", (10, 10))
+    img_path = temp_dir / "test.png"
+    out_path = temp_dir / "out.png"
+    img.save(img_path)
+
+    mock_enhancer = MagicMock()
+    mock_enhancer.generate_image.return_value = MagicMock()
+
+    with patch("image_enhancer.unload_all_models"), \
+         patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+         patch.dict(sys.modules, {"mflux.utils.scale_factor": None}, clear=False):
+        # Remove ScaleFactor from sys.modules if present to trigger ImportError
+        sys.modules.pop("mflux.utils.scale_factor", None)
+        with pytest.raises(ImportError, match="mflux is required"):
+            enhance_image(img_path, out_path)
+
+
 @pytest.mark.parametrize("softness", [-0.1, 1.1])
 def test_enhance_image_invalid_softness(softness):
     from image_enhancer import enhance_image
@@ -257,3 +433,307 @@ def test_enhance_image_invalid_softness(softness):
         Image.new("RGB", (10, 10)).save(img_path)
         with pytest.raises(ValueError, match="softness must be between 0.0 and 1.0"):
             enhance_image(img_path, out_path, softness=softness)
+
+
+@pytest.mark.parametrize("softness", [0.0, 1.0])
+def test_enhance_image_valid_boundary_softness_forwarded(softness):
+    """Test that the inclusive softness boundaries (0.0, 1.0) are accepted and forwarded."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    from PIL import Image
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path, softness=softness)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["softness"] == softness
+
+
+
+def test_enhance_image_dimensions_not_passed_when_none():
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+    from PIL import Image
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert "width" not in call_kwargs
+        assert "height" not in call_kwargs
+
+
+def test_enhance_image_tiled_vae_true_passes_to_get_enhancer():
+    """Test that tiled_vae=True is forwarded to _get_enhancer."""
+    from image_enhancer import enhance_image, _get_enhancer
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer) as mock_get, \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path, tiled_vae=True)
+
+        mock_get.assert_called_once_with(True)
+
+
+def test_enhance_image_tiled_vae_false_default_passes_to_get_enhancer():
+    """Test that default tiled_vae=False is forwarded to _get_enhancer."""
+    from image_enhancer import enhance_image, _get_enhancer
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer) as mock_get, \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path)
+
+        mock_get.assert_called_once_with(False)
+
+
+def test_enhance_image_default_softness_forwarded():
+    """Test that default softness=0.5 is forwarded to generate_image when not specified."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["softness"] == 0.5
+
+
+def test_enhance_image_user_seed_propagates_to_generate_image():
+    """Test that a user-specified seed is forwarded to generate_image."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path, seed=42)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["seed"] == 42
+
+
+def test_enhance_image_zero_seed_not_randomized():
+    """Test that seed=0 is passed through unchanged (not replaced by random)."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}):
+            enhance_image(img_path, out_path, seed=0)
+
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["seed"] == 0
+
+
+def test_enhance_image_random_seed_within_uint32_range():
+    """Test that the generated random seed uses the full [0, 2**32 - 1] seed space."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_enhancer.generate_image.return_value = MagicMock()
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock()}), \
+             patch("image_enhancer.random.randint", return_value=2**32 - 1) as mock_randint:
+            enhance_image(img_path, out_path)
+
+        mock_randint.assert_called_once_with(0, 2**32 - 1)
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert call_kwargs["seed"] == 2**32 - 1
+
+
+def test_enhance_image_resolution_always_scale_factor_2():
+    """Test that resolution is always ScaleFactor(2) regardless of other kwargs."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+        mock_scale_factor_instance = MagicMock()
+        mock_scale_factor_cls = MagicMock(return_value=mock_scale_factor_instance)
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock(ScaleFactor=mock_scale_factor_cls)}):
+            enhance_image(img_path, out_path)
+
+        mock_scale_factor_cls.assert_called_once_with(2)
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert isinstance(call_kwargs["resolution"], MagicMock)
+
+
+class TestCollectImagesEdgeCases:
+    """Tests for edge cases in image collection."""
+
+    def test_collect_directory_with_uppercase_extensions(self, temp_dir):
+        """Test that uppercase file extensions are collected."""
+        Image.new("RGB", (10, 10)).save(temp_dir / "a.PNG")
+        Image.new("RGB", (10, 10)).save(temp_dir / "b.JPG")
+
+        result = collect_images(str(temp_dir))
+        names = [r.name for r in result]
+        assert "a.PNG" in names
+        assert "b.JPG" in names
+
+    def test_collect_directory_with_jpeg_extension(self, temp_dir):
+        """Test that .jpeg extension is collected."""
+        Image.new("RGB", (10, 10)).save(temp_dir / "photo.jpeg")
+
+        result = collect_images(str(temp_dir))
+        assert result[0].name == "photo.jpeg"
+
+    def test_collect_directory_follows_symlinked_subdirectories(self, temp_dir):
+        """Test that images inside symlinked subdirectories are found."""
+        import os
+        # Create a real subdir with an image
+        sub = temp_dir / "subdir"
+        sub.mkdir()
+        Image.new("RGB", (10, 10)).save(sub / "inside.png")
+
+        # Symlink the subdir into temp_dir's root
+        link = temp_dir / "linked_subdir"
+        os.symlink(str(sub), str(link))
+
+        result = collect_images(str(temp_dir))
+        names = {r.name for r in result}
+        assert "inside.png" in names
+
+    def test_collect_single_jpeg_file(self):
+        """Test collecting a single .jpeg file."""
+        import tempfile
+        from pathlib import Path as PPath
+        with tempfile.TemporaryDirectory() as tmpdir:
+            img = Image.new("RGB", (10, 10))
+            fpath = PPath(tmpdir) / "photo.jpeg"
+            img.save(fpath)
+            result = collect_images(str(fpath))
+            assert len(result) == 1
+
+    def test_collect_directory_with_webp_extension(self, temp_dir):
+        """Test that .webp extension is collected."""
+        Image.new("RGB", (10, 10)).save(temp_dir / "anim.webp")
+
+        result = collect_images(str(temp_dir))
+        names = [r.name for r in result]
+        assert "anim.webp" in names
+
+
+def test_enhance_image_scale_factor_passed_to_generate_image():
+    """Test that ScaleFactor(2) is correctly forwarded to generate_image."""
+    from image_enhancer import enhance_image
+    from unittest.mock import MagicMock, patch
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        img_path = Path(tmpdir) / "test.png"
+        out_path = Path(tmpdir) / "out.png"
+        Image.new("RGB", (10, 10)).save(img_path)
+
+        mock_enhancer = MagicMock()
+        mock_result = MagicMock()
+        mock_enhancer.generate_image.return_value = mock_result
+        mock_scale_factor_instance = MagicMock()
+        mock_scale_factor_cls = MagicMock(return_value=mock_scale_factor_instance)
+
+        with patch("image_enhancer.unload_all_models"), \
+             patch("image_enhancer._get_enhancer", return_value=mock_enhancer), \
+             patch.dict(sys.modules, {"mflux.utils.scale_factor": MagicMock(ScaleFactor=mock_scale_factor_cls)}):
+            enhance_image(img_path, out_path)
+
+        mock_scale_factor_cls.assert_called_once_with(2)
+        call_kwargs = mock_enhancer.generate_image.call_args.kwargs
+        assert isinstance(call_kwargs["resolution"], MagicMock)

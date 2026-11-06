@@ -3,6 +3,7 @@
 
 import shutil
 import sys
+import json
 from pathlib import Path
 
 import click
@@ -10,7 +11,23 @@ from config import settings, paths
 from grammar_generator import generate_grammar
 from image_enhancer import enhance_image, collect_images
 from pipeline import PipelineExecutor
-from utils import check_lm_studio
+from metadata_manager import MetadataError, MetadataManager
+from utils import check_lm_studio, prompt_files_in_run
+
+
+def _read_prompt_from_stdin(prompt: str | None) -> str | None:
+    """If prompt is '-' read from stdin, otherwise return unchanged."""
+    if prompt == "-":
+        try:
+            text = sys.stdin.read().strip()
+            if not text:
+                click.echo("Error: empty prompt read from stdin", err=True)
+                sys.exit(1)
+            return text
+        except KeyboardInterrupt:
+            click.echo("\nInterrupted.", err=True)
+            sys.exit(130)
+    return prompt
 
 
 def clean_generated():
@@ -28,6 +45,75 @@ def clean_generated():
     return count
 
 
+def _read_user_prompt(run_dir: Path) -> str | None:
+    """Read the original user prompt from a run's metaprompt metadata.
+
+    Fail-soft: --list must work for legacy and partially generated runs, so
+    missing, malformed, or non-string prompt fields yield None. Prefer the
+    producer's user_prompt over legacy prompt; empty strings are valid values.
+    """
+    try:
+        data = MetadataManager.load_raw(run_dir)
+    except MetadataError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    prompt = data.get("user_prompt")
+    if not isinstance(prompt, str):
+        prompt = data.get("prompt")
+    return prompt if isinstance(prompt, str) else None
+
+
+def list_generated(as_json: bool = False, quiet: bool = False, full: bool = False) -> None:
+    """List existing generated prompt runs with prompt/image counts and user prompt (read-only)."""
+    image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
+    runs = []
+    if paths.prompts_dir.exists():
+        for d in sorted(paths.prompts_dir.iterdir()):
+            if d.is_dir():
+                prompt_count = len(prompt_files_in_run(d))
+                image_count = 0
+                for f in d.iterdir():
+                    if f.is_file():
+                        suffix = f.suffix.lower()
+                        if suffix in image_extensions:
+                            image_count += 1
+                runs.append({
+                    "run_id": d.name,
+                    "prompt_count": prompt_count,
+                    "image_count": image_count,
+                    "user_prompt": _read_user_prompt(d),
+                })
+
+    if quiet:
+        return
+    if as_json:
+        click.echo(json.dumps(runs, indent=2))
+        return
+    if not runs:
+        click.echo("No runs found.")
+        return
+    for run in runs:
+        line = f"{run['run_id']}: {run['prompt_count']} prompts"
+        if run["image_count"]:
+            plural = "s" if run["image_count"] != 1 else ""
+            line += f", {run['image_count']} image{plural}"
+        user_prompt = run["user_prompt"]
+        if user_prompt:
+            if not full and len(user_prompt) > 60:
+                user_prompt = user_prompt[:60] + "..."
+            line += f" ({user_prompt})"
+        click.echo(line)
+    total_prompts = sum(run["prompt_count"] for run in runs)
+    total_images = sum(run["image_count"] for run in runs)
+    run_plural = "s" if len(runs) != 1 else ""
+    line = f"Total: {len(runs)} run{run_plural}, {total_prompts} prompts"
+    if total_images:
+        plural = "s" if total_images != 1 else ""
+        line += f", {total_images} image{plural}"
+    click.echo(line)
+
+
 def cli_progress(stage: str, current: int = 0, total: int = 0, message: str = "") -> None:
     """Progress callback for CLI that uses click.echo."""
     if message:
@@ -37,16 +123,30 @@ def cli_progress(stage: str, current: int = 0, total: int = 0, message: str = ""
             click.echo(message)
 
 
+def _status_echo(message: str) -> None:
+    """Write informational status message to stderr (keeps stdout clean for --json)."""
+    click.echo(message, err=True)
+
+
 @click.command()
+@click.version_option(version="1.0.0")
 @click.option(
-    '-p', '--prompt',
-    default=None,
+    '-p', '--prompt',    default=None,
     help='Image description to generate variations for'
 )
 @click.option(
     '--clean',
     is_flag=True,
     help='Remove all generated files (grammars and prompts)'
+)
+@click.option(
+    '--list', 'as_list',
+    is_flag=True,
+    help='List existing generated prompt runs with prompt counts and user prompts'
+)
+@click.option(
+    '--full', is_flag=True,
+    help='With --list: show the complete user prompt (no 60-char truncation)'
 )
 @click.option(
     '-n', '--count',
@@ -172,6 +272,24 @@ def cli_progress(stage: str, current: int = 0, total: int = 0, message: str = ""
     type=int,
     help='Port for web UI server (default: 8000)'
 )
+@click.option(
+    '--version-check',
+    is_flag=True,
+    help='Verify LM Studio connectivity before starting'
+)
+@click.option(
+    '--quiet', is_flag=True,
+    help='Suppress non-error output'
+)
+@click.option(
+    '--json', 'as_json', is_flag=True, default=False,
+    help='Output summary as JSON (useful for scripting)'
+)
+@click.option(
+    '--dump-config',
+    is_flag=True,
+    help='Print all effective settings and exit (no pipeline runs)',
+)
 def main(
     prompt: str | None,
     clean: bool,
@@ -198,6 +316,12 @@ def main(
     no_enhance_tiled_vae: bool,
     serve: bool,
     port: int,
+    as_json: bool = False,
+    quiet: bool = False,
+    version_check: bool = False,
+    dump_config: bool = False,
+    as_list: bool = False,
+    full: bool = False,
 ):
     """
     Generate FLUX 3 Image Klein prompt variations using local LLM-powered Tracery grammars.
@@ -225,16 +349,41 @@ def main(
         uv run python src/cli.py --enhance-images path/to/folder/
         uv run python src/cli.py --enhance-images "generated/prompts/*/test_*.png"
     """
+
+    prompt = _read_prompt_from_stdin(prompt)
+
+    # Handle --dump-config: print all settings and exit
+    if dump_config:
+        _print_settings(quiet=quiet)
+        return
+
+    # Handle --version-check
+    if version_check:
+        if check_lm_studio(base_url):
+            _status_echo(f"Successfully connected to LM Studio at {base_url}")
+            return
+        else:
+            click.echo(f"Error: LM Studio is not reachable at {base_url}.", err=True)
+            sys.exit(1)
+
     # LM Studio is required only when creating a grammar.
-    if prompt and not from_grammar and not from_prompts and not check_lm_studio(base_url):
-        click.echo(f"Error: LM Studio is not reachable at {base_url}. Please ensure it is running.", err=True)
-        sys.exit(1)
+
+    # Handle --list: read-only inspection, no pipeline or LM Studio needed
+    if as_list:
+        list_generated(as_json=as_json, quiet=quiet, full=full)
+        return
 
     # Handle --clean
     if clean:
         removed = clean_generated()
-        click.echo(f"Cleaned {removed} items from {paths.generated_dir}")
+        if not quiet:
+            if removed == 0:
+                _status_echo("Nothing to clean.")
+            else:
+                _status_echo(f"Cleaned {removed} items from {paths.generated_dir}")
         if not prompt and not from_grammar and not from_prompts and not enhance_images and not serve:
+            if as_json:
+                click.echo(json.dumps({"success": True, "cleaned_count": removed}, indent=2))
             return
 
     # Handle --serve: Start web UI server
@@ -242,8 +391,9 @@ def main(
         import webbrowser
         import threading
 
-        click.echo(f"Starting web UI server at http://localhost:{port}")
-        click.echo("Press Ctrl+C to stop")
+        if not quiet:
+            _status_echo(f"Starting web UI server at http://localhost:{port}")
+            _status_echo("Press Ctrl+C to stop")
 
         def open_browser():
             import time
@@ -275,12 +425,14 @@ def main(
         click.echo("Error: --from-prompts requires --generate-images", err=True)
         sys.exit(1)
 
-    if not prompt and not from_grammar and not from_prompts and not clean and not enhance_images:
+    if not prompt and not from_grammar and not from_prompts and not clean and not enhance_images and not dry_run:
         click.echo("Error: --prompt is required (or use --from-grammar/--from-prompts/--enhance-images/--serve)", err=True)
         sys.exit(1)
 
     if prompt and (from_grammar or from_prompts):
-        click.echo("Warning: --prompt is ignored when using --from-grammar or --from-prompts", err=True)
+        if not quiet:
+            click.echo("Warning: --prompt is ignored when using --from-grammar or --from-prompts", err=True)
+        # Note: It's better to just proceed if it's just a warning.
 
     if not (0.0 <= temperature <= 2.0):
         raise click.BadParameter(f"temperature must be between 0.0 and 2.0, got {temperature}")
@@ -372,12 +524,23 @@ def main(
         sys.exit(1)
 
     # Print summary
-    click.echo(f"\nGenerated {result.prompt_count} prompts in: {result.output_dir}")
-    if result.image_count > 0:
-        if result.skipped_count > 0:
-            click.echo(f"Generated {result.image_count} images, skipped {result.skipped_count} existing")
-        else:
-            click.echo(f"Generated {result.image_count} images")
+    summary = {
+        "prompt_count": result.prompt_count,
+        "output_dir": str(result.output_dir) if result.output_dir else None,
+        "image_count": result.image_count,
+        "skipped_count": result.skipped_count,
+        "success": result.success,
+    }
+
+    if as_json:
+        click.echo(json.dumps(summary, indent=2))
+    else:
+        click.echo(f"\nGenerated {result.prompt_count} prompts in: {result.output_dir}")
+        if result.image_count > 0:
+            if result.skipped_count > 0:
+                click.echo(f"Generated {result.image_count} images, skipped {result.skipped_count} existing")
+            else:
+                click.echo(f"Generated {result.image_count} images")
 
 
 def _run_standalone_enhancement(
@@ -394,30 +557,27 @@ def _run_standalone_enhancement(
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    click.echo(f"Enhancing {len(images)} images with SeedVR2 (2x upscale, softness={enhance_softness})...")
+    with click.progressbar(images, label=f"Enhancing {len(images)} images") as bar:
+        current_seed = seed
+        for img_path in bar:
+            click.echo(f"\nEnhancing {img_path.name} (replacing original)...")
+            try:
+                enhance_image(
+                    image_path=img_path,
+                    output_path=img_path,
+                    softness=enhance_softness,
+                    seed=current_seed,
+                    tiled_vae=not no_enhance_tiled_vae,
+                )
+            except ImportError as e:
+                click.echo(f"Error: {e}", err=True)
+                sys.exit(1)
+            except Exception as e:
+                click.echo(f"Error enhancing image: {e}", err=True)
+                sys.exit(1)
 
-    current_seed = seed
-
-    for idx, img_path in enumerate(images, 1):
-        click.echo(f"  [{idx}/{len(images)}] Enhancing {img_path.name} (replacing original)...")
-
-        try:
-            enhance_image(
-                image_path=img_path,
-                output_path=img_path,
-                softness=enhance_softness,
-                seed=current_seed,
-                tiled_vae=not no_enhance_tiled_vae,
-            )
-        except ImportError as e:
-            click.echo(f"Error: {e}", err=True)
-            sys.exit(1)
-        except Exception as e:
-            click.echo(f"Error enhancing image: {e}", err=True)
-            sys.exit(1)
-
-        if current_seed is not None:
-            current_seed += 1
+            if current_seed is not None:
+                current_seed += 1
 
     click.echo(f"\nEnhanced {len(images)} images")
 
@@ -449,9 +609,15 @@ def _run_dry_run(
                 width=width,
                 height=height,
             )
-        except Exception as e:
+        except KeyboardInterrupt:
+            click.echo("\nInterrupted.", err=True)
+            sys.exit(130)
+        except (ConnectionError, TimeoutError) as e:
             click.echo(f"Error generating grammar: {e}", err=True)
             click.echo("Make sure LM Studio is running at " + base_url, err=True)
+            sys.exit(1)
+        except Exception as e:
+            click.echo(f"Error generating grammar: {e}", err=True)
             sys.exit(1)
 
         if was_cached:
@@ -465,6 +631,30 @@ def _run_dry_run(
     else:
         click.echo("Error: --prompt is required for --dry-run", err=True)
         sys.exit(1)
+
+
+def _print_settings(quiet: bool = False) -> None:
+    """Print all effective settings with their current values.
+
+    When quiet=True, suppresses output (silent).
+    """
+    if not quiet:
+        import dataclasses as dc
+
+        print("FLUX 3 Image Klein CLI Settings")
+        print("=" * 50)
+        for name, obj in [("LM Studio", settings.lm_studio),
+                           ("Image Generation", settings.image_generation),
+                           ("Server", settings.server),
+                           ("Enhancement", settings.enhancement)]:
+            print(f"\n[{name}]")
+            if dc.is_dataclass(obj):
+                for field in dc.fields(obj):
+                    value = getattr(obj, field.name)
+                    # Format paths as strings, others normally
+                    if hasattr(value, '__fspath__'):
+                        value = str(value)
+                    print(f"  {field.name}: {value}")
 
 
 if __name__ == '__main__':

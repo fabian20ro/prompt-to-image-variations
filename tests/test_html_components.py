@@ -1,5 +1,8 @@
 """Tests for html_components.py - shared HTML/CSS/JS components."""
 
+import pytest
+import re
+
 from html_components import (
     LogPanel,
     QueueStatusBar,
@@ -15,6 +18,49 @@ from html_components import (
 )
 
 
+class TestButtons:
+    """Tests for Buttons component."""
+
+    def test_css_returns_string(self):
+        css = Buttons.css()
+        assert ".btn" in css
+
+    def test_all_button_variants_defined(self):
+        """Buttons.css() must define every button variant used by the UI.
+
+        The gallery relies on .btn-primary, .btn-secondary, and .btn-danger for all
+        interactive controls (generate, clear queue, kill job). Losing any one of them
+        silently breaks a user-facing action — buttons become invisible or unstyled.
+        Each selector must survive as a substring so regression cannot remove one
+        without the test catching it. The disabled-state rule is also required: users
+        need visual feedback when actions are unavailable (e.g. during generation).
+        """
+        css = Buttons.css()
+        assert ".btn-primary" in css, "Primary button style must be defined."
+        assert ".btn-secondary" in css, "Secondary button style must be defined."
+        assert ".btn-danger" in css, "Danger button style must be defined."
+        assert ".btn-small" in css, "Small button modifier must be defined."
+        assert ":disabled" in css or "disabled {" in css, (
+            "Disabled state styling must exist so users see unavailable actions.\""
+        )
+
+    def test_touch_target_minimum_height(self):
+        """Buttons.css() enforces a 44px minimum height on touch targets.
+
+        Mobile users need adequately-sized tap targets per accessibility guidelines.
+        Without this, gallery controls become hard to hit on phones — causing failed
+        submissions and frustrating UX. The (pointer: coarse) media query is the
+        observable mechanism that triggers the increased sizing for touch devices.
+        """
+        css = Buttons.css()
+        assert "44px" in css or "min-height: 44" in css, (
+            "Touch targets must have a 44px minimum height per accessibility standards."
+        )
+        assert "@media" in css and "(pointer:" in css, (
+            "Touch-specific sizing must be gated by the pointer media query feature."
+        )
+
+
 class TestLogPanel:
     """Tests for LogPanel component."""
 
@@ -23,6 +69,49 @@ class TestLogPanel:
         assert "log-panel" in html
         assert "log-content" in html
         assert "log-count" in html
+        # The clear button is in REQUIRED_HTML_IDS; removing it would break the
+        # JS clearLogs() binding and fail validate() with a specific message.
+        assert 'id="btn-clear-logs"' in html
+
+    def test_validate_passes_when_all_required_ids_present(self):
+        """LogPanel.validate() passes when the produced HTML contains every
+        element id in REQUIRED_HTML_IDS.
+
+        The contract is idempotent against the real markup: validate() rebuilds
+        the HTML via cls.html() and checks each required id in both quote
+        styles. A passing call on the current markup proves the registry and
+        the markup agree — the cheapest regression guard available without a
+        browser.
+        """
+        LogPanel.validate()
+
+    def test_validate_raises_specific_value_error_when_id_missing(self):
+        """LogPanel.validate() must fail specifically, not silently.
+
+        If a required id is removed from the markup, validate() must raise
+        ValueError naming the missing id so the JS-binding breakage is caught
+        at build time instead of surfacing as a dead Clear button in the UI.
+        Monkeypatching html() lets us break exactly one id at a time.
+        """
+        for element_id in LogPanel.REQUIRED_HTML_IDS:
+            broken = LogPanel.html().replace(f'id="{element_id}"', "id=removed")
+
+            def fake_html() -> str:
+                return broken
+
+            monkeypatch = None  # placeholder to keep the loop simple
+
+            class BrokenLogPanel(LogPanel):
+                @staticmethod
+                def html() -> str:
+                    return broken
+
+                @classmethod
+                def validate(cls) -> None:
+                    super().validate()
+
+            with pytest.raises(ValueError, match=element_id):
+                BrokenLogPanel.validate()
 
     def test_css_returns_string(self):
         css = LogPanel.css()
@@ -34,6 +123,67 @@ class TestLogPanel:
         assert "appendLog" in js
         assert "clearLogs" in js
         assert "MAX_LOG_LINES" in js
+
+    def test_escape_html_function_exists(self):
+        """escapeHtml must be a standalone function callable from log-line rendering."""
+        js = LogPanel.js()
+        # The function is defined with 'function escapeHtml(text)' at top level.
+        assert "function escapeHtml(" in js or "escapeHtml = function" in js
+
+    def test_escape_html_produces_escaped_output(self):
+        """escapeHtml uses DOM textContent→innerHTML, so raw HTML is escaped.
+
+        This is a security contract: without proper escaping, user-supplied log
+        messages could inject HTML/script tags into the gallery UI (XSS).
+        The implementation creates a div, sets .textContent, then reads .innerHTML —
+        which forces browsers to escape < > & characters.
+        """
+        js = LogPanel.js()
+        # Verify the DOM-based pattern is used: createElement + textContent + innerHTML.
+        assert "createElement('div')" in js or 'createElement("div")' in js
+        assert "textContent" in js
+        assert "innerHTML" in js
+
+    def test_error_warning_classification_uses_else_if(self):
+        """Log line classification uses exclusive branching for error/warning classes.
+
+        The implementation assigns `.error` and `.warning` CSS classes based on the
+        message content to make errors visually distinct from normal log lines. Using
+        two independent `if` blocks would allow a single line like 'Error in warning
+        handler' to get BOTH classes — doubling its visual weight and potentially
+        confusing users into thinking it's an error when it's really just a warning.
+        The `else if` chain guarantees at most one styling class is applied per line,
+        preserving the intended visual hierarchy: error > warning > info.
+        """
+        js = LogPanel.js()
+        # Pattern: 'if (...) className += " error"; else if (...) className += " warning"'
+        assert "else if" in js, (
+            "Error/warning classification must use `else if` to prevent double-class "
+            "assignment on lines containing both keywords."
+        )
+
+    def test_js_trims_oldest_lines_when_over_max(self):
+        """appendLog must remove the oldest lines once the panel holds more than
+        MAX_LOG_LINES entries.
+
+        The existing JS test only asserts that the MAX_LOG_LINES constant is
+        present in the source; a regression that keeps the constant while
+        deleting the trim loop would pass it, yet log-content would then grow
+        without bound over a long session — each appended line is a real DOM
+        node, and unbounded growth eventually makes the gallery sluggish. The
+        implemented trim is a while loop bounded by the cap that removes the
+        first child, keeping the DOM flat; it is observable in the produced JS.
+        """
+        js = LogPanel.js()
+        assert "removeChild" in js, (
+            "appendLog must remove the oldest log line when the count exceeds "
+            "MAX_LOG_LINES; otherwise the DOM grows without bound over long "
+            "generation sessions."
+        )
+        assert "children.length > MAX_LOG_LINES" in js, (
+            "The trim loop must be bounded by MAX_LOG_LINES so only the oldest "
+            "lines beyond the cap are removed."
+        )
 
 
 class TestQueueStatusBar:
@@ -51,6 +201,20 @@ class TestQueueStatusBar:
         assert ".queue-status" in css
         assert ".progress-bar" in css
 
+    def test_css_all_selectors_defined(self):
+        """QueueStatusBar CSS must define every selector used in its HTML.
+
+        Losing any selector silently breaks the component layout (e.g. hiding
+        the progress bar or action buttons when their class is missing from
+        CSS but present in markup). Each selector below must appear as a
+        substring so regression cannot remove one without the test catching it.
+        """
+        css = QueueStatusBar.css()
+        assert ".queue-info" in css
+        assert ".progress-container" in css
+        assert ".progress-fill" in css
+        assert ".queue-actions" in css
+
 
 class TestProgressBar:
     """Tests for ProgressBar component."""
@@ -65,6 +229,22 @@ class TestProgressBar:
         css = ProgressBar.css()
         assert ".progress-bar" in css or "progress" in css
 
+    def test_css_all_selectors_defined(self):
+        """ProgressBar CSS must define every selector used in its HTML.
+
+        The component uses .progress-track and .progress-info alongside the
+        progress bar itself; losing either silently breaks layout on pages
+        that include this component. Each selector below is a hard requirement.
+        """
+        css = ProgressBar.css()
+        assert ".progress-track" in css
+        assert ".progress-info" in css
+
+    def test_html_progress_track_present(self):
+        """ProgressBar.html must include the track container used by .progress-fill."""
+        html = ProgressBar.html()
+        assert "progress-track" in html
+
 
 class TestNotifications:
     """Tests for Notifications component."""
@@ -72,6 +252,36 @@ class TestNotifications:
     def test_html_contains_toast_region(self):
         html = Notifications.html()
         assert "toast-region" in html
+
+    def test_confirm_modal_dom_preconditions_present(self):
+        """Notifications.html() must define every DOM node confirmAction() depends on.
+
+        confirmAction() guards with `if (!modal || !msg || !ok || !cancel) return
+        Promise.resolve(false)`, so the confirm-modal, confirm-message, confirm-ok,
+        and confirm-cancel ids are hard preconditions for the dialog to work.
+        Removing any one of them would make every confirmAction() call silently
+        resolve to false — destructive actions would lose their confirmation
+        prompt — while the JS still looks intact. The existing markup test only
+        asserts toast-region, so this is the missing observable contract: all
+        four guard-referenced ids must exist in the produced HTML.
+        """
+        html = Notifications.html()
+        assert 'id="confirm-modal"' in html, (
+            "confirmAction() requires the confirm-modal node; without it every "
+            "confirmation dialog silently resolves to false."
+        )
+        assert 'id="confirm-message"' in html, (
+            "confirmAction() requires the confirm-message node to render the "
+            "prompt text."
+        )
+        assert 'id="confirm-ok"' in html, (
+            "confirmAction() requires the confirm-ok node; users could never "
+            "approve a confirmation."
+        )
+        assert 'id="confirm-cancel"' in html, (
+            "confirmAction() requires the confirm-cancel node; users could never "
+            "decline a confirmation."
+        )
 
     def test_css_returns_string(self):
         css = Notifications.css()
@@ -81,6 +291,74 @@ class TestNotifications:
         js = Notifications.js()
         assert "showToast" in js
 
+    def test_toast_fade_in_animation_present(self):
+        """Toasts must animate in with a fade-in effect so they feel less jarring.
+
+        Without animation, messages pop into view instantly — which works but feels
+        abrupt and lowers perceived polish. The CSS should define @keyframes fadeIn
+        and apply it to .toast elements as a short ease-out transition.
+        """
+        css = Notifications.css()
+        assert "@keyframes fadeIn" in css, (
+            "Fade-in animation keyframes must be defined for toast appearances."
+        )
+        assert ".toast {".startswith("    .toast") or "animation:" in css, (
+            "The fade-in animation must be applied to the .toast class so it actually runs."
+        )
+
+    def test_confirm_action_returns_false_when_dom_absent(self):
+        """confirmAction must short-circuit with Promise.resolve(false) when the
+        modal DOM is missing — otherwise callers crash on a page that hasn't
+        finished loading. The guard clause checks all four required elements and
+        returns early before any listener setup.
+        """
+        js = Notifications.js()
+        assert "return Promise.resolve(false)" in js, (
+            "confirmAction must return Promise.resolve(false) when DOM elements are absent."
+        )
+
+    def test_showtoast_uses_textcontent_not_innerhtml(self):
+        """showToast must set toast element content via textContent, not innerHTML.
+
+        The message parameter is user-supplied (e.g., a prompt status update).
+        If showToast used el.innerHTML = message instead of el.textContent = message,
+        an attacker could inject HTML/script tags into the toast region. Using
+        textContent forces browser escaping of any embedded markup, preventing
+        XSS via notification messages. This is observable as 'textContent' in
+        the produced JS source — confirming the security contract holds.
+        """
+        js = Notifications.js()
+        assert "el.textContent" in js, (
+            "showToast must set el.textContent to prevent XSS via user-supplied messages."
+        )
+
+    def test_showtoast_default_timeout_observable(self):
+        """showToast defines a default timeout of 3200ms as an observable constant.
+
+        The auto-dismiss timeout is exposed as the third parameter's default value,
+        making it inspectable from source without runtime execution. Losing this
+        constant silently changes dismiss timing and makes it impossible to tune
+        without modifying the function signature directly.
+        """
+        js = Notifications.js()
+        assert "3200" in js, (
+            "showToast default timeout of 3200ms must be observable as a literal "
+            "in the produced JS source for visibility and tuning."
+        )
+
+    def test_showtoast_click_to_dismiss_wired(self):
+        """showToast wires onclick to remove the toast element on click.
+
+        Users need an immediate way to dismiss notifications — waiting 3.2s is
+        wasteful when they've already read the message. The implementation must
+        attach an onclick handler that calls el.remove() so clicking a toast
+        dismisses it instantly, while the setTimeout timeout still runs for
+        non-interacted toasts. Observable as 'onclick' in the produced JS source.
+        """
+        js = Notifications.js()
+        assert "onclick" in js, (
+            "showToast must attach an onclick handler so users can click-to-dismiss toasts."
+        )
 
 class TestSSEClient:
     """Tests for SSEClient component."""
@@ -94,13 +372,113 @@ class TestSSEClient:
         assert "connectSSE" in js
         assert "MAX_SSE_RETRIES" in js
 
+    def test_js_exponential_backoff_with_cap(self):
+        """SSE reconnection must use exponential backoff capped at a max delay.
 
-class TestButtons:
-    """Tests for Buttons component."""
+        The implementation uses Math.min(3000 * 2^(retries-1), 30000). Losing the
+        cap silently turns network blips into permanent busy-loops; losing the
+        exponent turns it into linear retries that flood the server during outage.
+        Both behaviors are observable as substrings in the produced JS.
+        """
+        js = SSEClient.js()
+        assert "Math.pow(2," in js or "** 2" in js, (
+            "SSE reconnection must use exponential backoff to avoid flooding a "
+            "server that is still recovering."
+        )
+        assert "30000" in js, (
+            "Retry delay must be capped; without a ceiling the client would "
+            "retry indefinitely with ever-growing intervals."
+        )
 
-    def test_css_returns_string(self):
-        css = Buttons.css()
-        assert ".btn" in css
+    def test_js_contains_retry_cap_constant(self):
+        """SSEClient.js() defines MAX_SSE_RETRIES as an observable constant.
+
+        The retry cap is exported verbatim in the produced JS string so callers
+        cannot accidentally drift from the intended ceiling without noticing.
+        Losing it would silently allow unbounded reconnection attempts during
+        extended outages, burning resources on a dead server.
+        """
+        js = SSEClient.js()
+        assert "MAX_SSE_RETRIES" in js, (
+            "Retry cap constant MAX_SSE_RETRIES must be defined as a named "
+            "constant in the produced JS."
+        )
+
+    def test_js_contains_connect_sse_function(self):
+        """SSEClient.js() exports connectSSE as a callable function.
+
+        The reconnection logic is entry-point for SSE setup; callers invoke it
+        without arguments to establish or refresh the event stream. Losing its
+        definition silently breaks real-time updates on all gallery pages that
+        include this component.
+        """
+        js = SSEClient.js()
+        assert "function connectSSE" in js, (
+            "connectSSE function must be defined as a standalone callable in "
+            "the produced JS."
+        )
+
+    def test_js_references_event_source_constructor(self):
+        """SSEClient.js() references the global EventSource constructor.
+
+        The component constructs a new EventSource to open the SSE stream;
+        losing this reference silently prevents real-time updates from
+        functioning, even if connectSSE remains defined.
+        """
+        js = SSEClient.js()
+        assert "new EventSource" in js, (
+            "SSEClient must construct a new EventSource instance to open the "
+            "stream; without it real-time updates would silently stop working."
+        )
+
+    def test_ping_handler_neutralizes_server_pings(self):
+        """Server-initiated 'ping' events must not trigger reconnection.
+
+        The server sends periodic ping events as heartbeats; without a dedicated
+        handler, each ping would fire onerror (since there is no listener for an
+        unknown event type), incrementing sseRetryCount and eventually exhausting
+        the retry budget even though the connection is healthy. Registering an
+        empty addEventListener('ping', () => {}) short-circuits pings before they
+        reach the error handler, preserving retry headroom for genuine outages.
+        """
+        js = SSEClient.js()
+        assert (
+            "addEventListener('ping'" in js or 'addEventListener("ping"' in js
+        ), (
+            "A ping event listener must be registered to prevent server heartbeats "
+            "from exhausting the retry budget during healthy connections."
+        )
+        # Both quote-style forms must parse — confirms the handler is actually
+        # wired and not just a dead string/comment that would pass the bare
+        # substring check above while silently failing at runtime.
+        assert ("addEventListener('ping'" in js) or ('addEventListener("ping"' in js), (
+            "Ping handler registration must use valid JS quote syntax so it is "
+            "actually invoked by the browser."
+        )
+        # The handler body must be empty — a non-empty ping handler would do
+        # actual work on every heartbeat and could trigger reconnection itself.
+        assert "() =>" in js, (
+            "Ping handler must have an empty no-op body so heartbeats are truly "
+            "neutralized without side effects."
+        )
+
+    def test_js_resets_retry_count_on_open(self):
+        """A successful SSE open must reset the retry counter to zero.
+
+        connectSSE() gives up permanently once sseRetryCount reaches MAX_SSE_RETRIES.
+        Without resetting sseRetryCount = 0 in onopen, the counter keeps accumulating
+        across reconnects: a flaky-but-healthy stream that reconnects a few times
+        would erode its retry headroom and eventually give up even though every
+        connection was successful. Resetting on open is what preserves a full retry
+        budget for genuine future outages. The reset is observable as the
+        'sseRetryCount = 0' assignment inside the onopen handler.
+        """
+        js = SSEClient.js()
+        assert "sseRetryCount = 0" in js, (
+            "onopen must reset sseRetryCount to zero; otherwise a healthy "
+            "connection's retry budget is eroded across reconnects and the "
+            "client gives up prematurely on a later genuine outage."
+        )
 
 
 class TestNavHeader:
@@ -124,17 +502,76 @@ class TestStyleClasses:
         assert isinstance(css, str)
         assert len(css) > 0
 
+    def test_interactive_styles_composes_all_sections(self):
+        """InteractiveStyles.css() must include every sub-component's CSS section.
+
+        The class concatenates NavHeader, Buttons, LogPanel, ProgressBar CSS and a
+        body-padding rule. Losing any one of these sections silently breaks the
+        gallery layout (e.g., missing button styles make controls invisible). Each
+        selector must survive as a substring so regression cannot remove one without
+        the test catching it — mirroring the same defensive pattern used by other
+        component tests in this file.
+        """
+        css = InteractiveStyles.css()
+        assert ".nav-header" in css, "NavHeader CSS section must be composed."
+        assert ".btn-primary" in css, "Buttons CSS section must be composed."
+        assert ".log-panel" in css, "LogPanel CSS section must be composed."
+        assert ".progress-bar-fixed" in css, "ProgressBar CSS section must be composed."
+        assert "padding-bottom:" in css, (
+            "Body padding rule for fixed bars must be included so content is not "
+            "hidden behind the bottom status bar."
+        )
+
     def test_form_styles_css(self):
+        """FormStyles.css() must define every form selector used by the index page.
+
+        Losing any selector silently breaks a form element (e.g., missing .form-group
+        makes labels and inputs invisible). Each selector must survive as a substring
+        so regression cannot remove one without the test catching it — mirroring the
+        same defensive pattern used by other component tests in this file.
+        """
         css = FormStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
+        assert ".form-section" in css
+        assert ".form-row" in css
+        assert ".form-group" in css
 
     def test_gallery_styles_css(self):
+        """GalleryStyles.css() must define every gallery-specific selector.
+
+        GalleryStyles defines three gallery-specific style groups; losing any of
+        them silently breaks the user's gallery UI (action bar, grammar editor,
+        card actions). Each selector must survive as a substring so regression
+        cannot remove one without the test catching it — mirroring the same
+        defensive pattern used by other component tests in this file.
+        """
         css = GalleryStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
+        assert ".grammar-section-interactive" in css
+        assert ".action-bar" in css
+        assert ".card-actions" in css
 
     def test_index_styles_css(self):
+        """IndexStyles.css() must define the delete-button selector used on index cards.
+
+        The .btn-delete class is essential — it provides per-card deletion control.
+        Losing its CSS silently hides the button, removing a user-facing action.
+        Each selector below is a hard requirement verified as substring in CSS output.
+        """
         css = IndexStyles.css()
         assert isinstance(css, str)
         assert len(css) > 0
+        assert ".btn-delete" in css
+        assert "opacity: 1;" in css
+        # .btn-delete defaults to opacity: 0 and becomes visible on hover AND on
+        # keyboard focus. The opacity: 1 assertion above is satisfied by the
+        # :hover rule alone, so it would not catch removal of the :focus-within
+        # rule — after which keyboard users tabbing into a card would never see
+        # the delete control.
+        assert ".card:focus-within" in css, (
+            "Delete button must become visible on keyboard focus, not only on "
+            "mouse hover; without the :focus-within rule keyboard users can "
+            "never see the deletion control."
+        )

@@ -46,6 +46,14 @@ class GalleryService:
         base_dir = self.saved_dir if is_archive else self.prompts_dir
         run_dir = base_dir / run_id
 
+        # Reject paths that traverse outside the gallery directory (e.g. ".." or symlinks).
+        try:
+            file_path = run_dir.resolve()
+            file_path.relative_to(base_dir.resolve())
+        except ValueError:
+            location = "Archive" if is_archive else "Gallery"
+            raise GalleryNotFoundError(f"{location} not found: {run_id}")
+
         if not run_dir.exists():
             location = "Archive" if is_archive else "Gallery"
             raise GalleryNotFoundError(f"{location} not found: {run_id}")
@@ -143,11 +151,8 @@ class GalleryService:
         if prefix is None:
             prefix = self.get_prefix(run_dir)
 
-        prompt_files = sorted(run_dir.glob(f"{prefix}_*.txt"))
-        # Filter to only prompt files (prefix_N.txt), not other files
-        prompt_files = [f for f in prompt_files if f.stem.count('_') == 1]
-
-        return [f.read_text() for f in prompt_files]
+        from utils import get_prompts_from_run
+        return get_prompts_from_run(run_dir, prefix)
 
     def validate_file_access(self, file_path: Path, base_dir: Path) -> bool:
         """Validate file path for security (prevents path traversal).
@@ -212,3 +217,23 @@ class GalleryService:
             prefix = self.get_prefix(run_dir)
 
         return sorted(run_dir.glob(f"{prefix}_*_*.png"))
+
+    def get_run_summary(self, run_id: str) -> dict:
+        """Get a summary of a gallery run.
+
+        Args:
+            run_id: The run directory name
+
+        Returns:
+            Dictionary with prefix, image_count, prompt_count, and is_backup keys
+
+        Raises:
+            GalleryNotFoundError: If directory doesn't exist
+        """
+        run_dir = self.get_run_directory(run_id)
+        return {
+            "prefix": self.get_prefix(run_dir),
+            "image_count": self.count_images(run_dir),
+            "prompt_count": len(self.load_prompts(run_dir)),
+            "is_backup": self.is_backup_run(run_dir),
+        }

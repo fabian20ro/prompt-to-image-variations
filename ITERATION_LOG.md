@@ -20,6 +20,16 @@ Each entry should follow this structure:
 
 ---
 
+### [2026-07-12] Corrected default-branch CI trigger
+
+**Context:** Compound base-health evidence found that this repository's default branch is `master`, while CI push runs targeted `main`.
+**What happened:** Changed the CI push trigger to `master`; pull-request coverage remains unchanged.
+**Outcome:** Success — ruff passed, all 555 project tests passed, and the parent Hermes stack restarted healthy on 0.18.2.
+**Insight:** Base-branch automation must be checked against the repository's actual default branch, not a conventional branch name.
+**Promoted to Lessons Learned:** No
+
+---
+
 ### [2026-05-15] Added the shared HTML components test file to the test codemap
 
 **Context:** The test codemap and README coverage summary listed most major test surfaces, but they did not call out `tests/test_html_components.py`, which covers the shared CSS/JS building blocks used by the gallery and index pages.
@@ -312,6 +322,16 @@ Each entry should follow this structure:
 
 ---
 
+### [2026-08-04] Migrated repository identity
+
+**Context:** Git transport for the original GitHub repository was disabled, requiring a recoverable migration to a fresh repository and clearer product name.
+**What happened:** Renamed the product and package to Prompt to Image Variations, updated repository and Pages URLs, and retained historical run artifacts unchanged.
+**Outcome:** Local identity patch prepared for `fabian20ro/prompt-to-image-variations`; full automated checks run as migration verification.
+**Insight:** Historical reports should retain the repository identity recorded when they were generated; current code, package metadata, documentation, and operational links should use the replacement identity.
+**Promoted to Lessons Learned:** No
+
+---
+
 <!-- New entries go above this line, most recent first -->
 
 ### [2026-11-06] Audited current state and planned Qwen and FLUX 3 migration
@@ -373,3 +393,51 @@ Each entry should follow this structure:
 **What happened:** Refreshed remote refs, confirmed no existing PR for the branch, pushed migration commit aec7146, and opened PR #81 against master with breaking changes, measured verification, and the 23/24 corpus caveat.
 **Outcome:** https://github.com/fabian20ro/prompt-to-image-variations/pull/81. No merge or automatic merge requested. Publication journal recorded in a separate documentation-only commit; application code unchanged.
 **Promoted to Lessons Learned:** No
+
+### [2026-09-07] Complete gallery progress acceptance coverage
+
+**What happened:** Added regression cases for 3/5 = 60%, rounded 1/3 = 33%, and zero-total progress. The same tests verify progress text, status, escaped image prompt, sibling actions, and untouched cards.
+**Verification:** Container-isolated local-green passed Ruff and all 994 pytest cases. No live LM Studio or image generation required.
+**Insight:** A feature with a requested automated acceptance check remains insufficiently verified until that test exists, even when the implementation passes the previous suite.
+**Promoted to Lessons Learned:** No
+
+### [2026-09-25] Upgrade locked AnyIO security dependency
+
+**Context:** Critical dependency alert32, TLS hostname validation; installed lock had4.13.0.
+**What happened:** Upgrade only AnyIO to4.14.2. HTTPX dev dependency reaches AnyIO;
+production HTTP calls inspected use requests, so application exploitability is not established.
+No broad dependency refresh or behavioral changes. Discarded unrelated uv resolver formatting.
+**Verification:** Linux Ruff and1017 pytest cases passed; final minimal lock rechecked separately.
+**Promoted to Lessons Learned:** No
+
+### [2026-10-11] Raw-response sidecar is not a generated prompt
+
+**Context:** Independent CLI artifact-count acceptance exposed a raw-response sidecar counted as a prompt.
+**What happened:** Producer-shaped text/JSON fixture: two indexed prompts, raw response, one PNG and intended metadata count99. RED:3 prompts; GREEN:2/1. CLI and gallery share the existing utils artifact identity owner; custom prefixes and metadata-free/partial/corrupt runs preserved. Applied after natural cron commit e3299eb under the native execution lock and host integration fence.
+**Verification:** Isolated locked Python3.10 and CI3.14 suites; no LM call, artifact deletion or completed-proposal rewrite.
+**Insight:** Count present producer artifacts, not all text files or intended metadata counts.
+**Promoted to Lessons Learned:** No
+
+### [2026-10-20] Preserve raw producer and legacy prompts in CLI list
+
+**Context:** New manual human repair scope, not reopened historical proposal consent.
+The public CLI oracle reproduced three failures: legacy prompt absent from JSON,
+invalid modern field preventing fallback, and an explicit empty string becoming null.
+**What happened:** Three separate red/green cycles at `--list --json`; kept the
+existing raw MetadataManager reader, added typed legacy fallback and removed the
+truthiness check. No metadata rewrite, new output label, dependency or generation change.
+Added14 public CLI cases using real producer/metadata serialization, exact Unicode/
+whitespace, precedence, invalid types, raw-response exclusion and read-only inputs.
+**Verification:**1115tests pass on isolated locked LinuxPython3.10.20 and3.14.7;
+Ruff clean; CLI plus unchanged external oracle108PASS. Infrastructure restart/native
+worker/Discord evidence kept separately in the Hermes maintenance audit.
+**Insight:** Optional string presence is a type check, not a truthiness check. Read
+raw metadata before producer defaults can erase the distinction between absent and empty.
+**Promoted to Lessons Learned:** No; explicit zero-value preservation already documented.
+
+### [2026-11-07] Resolved PR #81 conflicts with master and verified merged suite
+
+**Context:** User requested resolving conflicts with master, running tests and pushing fixes to the existing PR. Merged origin/master at 74adfd0 without rewriting published migration history.
+**What happened:** Preserved both journal branches and combined master CLI listing/JSON/config, seeded Tracery, configuration/path validation, worker/gallery fixes and compatible coverage with the FLUX q4 migration. Kept neutral model paths, current runtime kwargs, strict grammar validation, sidecars and memory handoffs. Did not restore dead pipeline config exports or unsupported SeedVR2 width/height overrides. Adapted inherited tests to FLUX semantics; retained their compatible coverage and replaced private ERNIE-cache checks with public renderer behavior. Real Click progress-bar integration exposed an unsupported write method; regression observed red, corrected to click.echo, then green. Separate source integration review found no remaining merge errors. Clarified the web worker's separate 30-minute task deadline versus configurable liveness checks.
+**Outcome:** 1118 tests pass on Python 3.11.16 and 3.13.15 in separate locked environments without optional image packages; Ruff, lock consistency, dependency compatibility and whitespace checks pass. All 23 accepted corpus grammars and both saved hardware grammars replay successfully. No new real GPU inference or model/cache changes this iteration; prior hardware measurements remain explicitly historical. Prepared semantic merge commit for PR #81; push and GitHub conflict-state verification follow.
+**Promoted to Lessons Learned:** Yes

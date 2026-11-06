@@ -2,6 +2,8 @@
 
 import json
 import re
+import random
+
 import tracery
 from tracery.modifiers import base_english
 from grammar_generator import validate_grammar_structure
@@ -54,7 +56,7 @@ def generate_one(grammar_dict: dict, origin: str = "origin") -> str:
                    for index, part in enumerate(parts))
 
 
-def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin") -> list[str]:
+def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin", seed: int | None = None) -> list[str]:
     """
     Generate multiple texts from a Tracery grammar.
 
@@ -62,6 +64,9 @@ def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin") -> 
         grammar_json: JSON string containing Tracery grammar
         count: Number of variations to generate
         origin: The starting rule (default: "origin")
+        seed: Optional seed for the global random module. When given, the
+            module is seeded before the flatten loop so repeated calls with
+            the same seed produce identical output.
 
     Returns:
         List of generated texts
@@ -69,7 +74,13 @@ def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin") -> 
     Raises:
         TraceryError: If grammar is invalid
     """
+    if count <= 0:
+        return []
+
     grammar_dict = parse_grammar(grammar_json)
+
+    if seed is not None:
+        random.seed(seed)
 
     results = []
     for _ in range(count):

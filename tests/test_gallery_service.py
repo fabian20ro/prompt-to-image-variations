@@ -1,6 +1,7 @@
 """Tests for GalleryService."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -59,6 +60,67 @@ class TestGalleryService:
         with pytest.raises(GalleryNotFoundError, match="Archive not found"):
             service.get_run_directory("nonexistent", is_archive=True)
 
+    def test_get_run_directory_rejects_path_traversal(self, temp_dir):
+        """Test get_run_directory rejects a run_id that escapes the base directory.
+
+        The traversal guard runs before the existence check, so an *existing*
+        directory outside prompts/ is the strongest proof the guard itself
+        (not merely the missing-dir check) is what rejects it.
+        """
+        prompts_dir = temp_dir / "prompts"
+        saved_dir = temp_dir / "saved"
+        prompts_dir.mkdir()
+        # A real directory that exists but lives OUTSIDE prompts/.
+        outside = temp_dir / "outside"
+        (outside / "20240101_120000_abc123").mkdir(parents=True)
+
+        service = GalleryService(prompts_dir, saved_dir)
+        with pytest.raises(GalleryNotFoundError, match="Gallery not found"):
+            service.get_run_directory("../outside/20240101_120000_abc123")
+
+    def test_get_run_directory_rejects_symlink_escaping_base(self, temp_dir):
+        """Test get_run_directory rejects a symlink that points outside prompts/.
+
+        The guard resolves the path (Path.resolve follows symlinks) before the
+        containment check, so a run entry that exists inside prompts/ but links
+        to a directory outside must be rejected. A plain lexical ".." check
+        would let such a symlink escape, so the ".." traversal test alone does
+        not prove the resolve-based guard.
+        """
+        import os
+
+        prompts_dir = temp_dir / "prompts"
+        saved_dir = temp_dir / "saved"
+        prompts_dir.mkdir()
+        # A real directory that exists but lives OUTSIDE prompts/.
+        outside = temp_dir / "outside" / "20240101_120000_abc123"
+        outside.mkdir(parents=True)
+        # A symlink inside prompts/ pointing at the outside directory.
+        os.symlink(outside, prompts_dir / "20240101_120000_abc123")
+
+        service = GalleryService(prompts_dir, saved_dir)
+        with pytest.raises(GalleryNotFoundError, match="Gallery not found"):
+            service.get_run_directory("20240101_120000_abc123")
+
+    def test_get_run_directory_archive_rejects_path_traversal(self, temp_dir):
+        """Test get_run_directory in archive mode rejects a run_id that escapes saved/.
+
+        Mirrors the gallery-mode traversal test: an *existing* directory
+        outside saved/ proves the traversal guard (not the existence check)
+        is what rejects the request in archive mode.
+        """
+        prompts_dir = temp_dir / "prompts"
+        saved_dir = temp_dir / "saved"
+        prompts_dir.mkdir()
+        saved_dir.mkdir()
+        # A real directory that exists but lives OUTSIDE saved/.
+        outside = temp_dir / "archive_outside"
+        (outside / "archive_20240101").mkdir(parents=True)
+
+        service = GalleryService(prompts_dir, saved_dir)
+        with pytest.raises(GalleryNotFoundError, match="Archive not found"):
+            service.get_run_directory("../archive_outside/archive_20240101", is_archive=True)
+
     def test_load_metadata_success(self, temp_dir):
         """Test loading metadata."""
         (temp_dir / "test.metaprompt.json").write_text(json.dumps({
@@ -83,7 +145,7 @@ class TestGalleryService:
         (temp_dir / "test.metaprompt.json").write_text("not valid json")
 
         service = GalleryService(temp_dir, temp_dir)
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(json.JSONDecodeError, match="Expecting value"):
             service.load_metadata(temp_dir)
 
     def test_get_prefix(self, temp_dir):
@@ -95,6 +157,15 @@ class TestGalleryService:
 
     def test_get_prefix_default(self, temp_dir):
         """Test getting default prefix when no metadata."""
+        service = GalleryService(temp_dir, temp_dir)
+        assert service.get_prefix(temp_dir) == "image"
+
+    def test_get_prefix_metadata_exists_no_prefix_key(self, temp_dir):
+        """Test get_prefix returns 'image' when metadata exists but lacks 'prefix' key."""
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps({
+            "user_prompt": "a cat",
+        }))
+
         service = GalleryService(temp_dir, temp_dir)
         assert service.get_prefix(temp_dir) == "image"
 
@@ -115,6 +186,70 @@ class TestGalleryService:
         service = GalleryService(temp_dir, temp_dir)
         result = service.load_grammar(temp_dir, "test")
         assert result is None
+
+    def test_load_grammar_auto_detects_missing_prefix_returns_none(self, temp_dir):
+        """Test load_grammar returns None when auto-detecting prefix but no grammar file exists."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "cat.metaprompt.json").write_text(json.dumps({"prefix": "cat"}))
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.load_grammar(run_dir)  # no explicit prefix — auto-detects from metadata
+
+        assert result is None
+
+    def test_load_grammar_auto_detects_existing_grammar_returns_content(self, temp_dir):
+        """Test load_grammar returns grammar content when auto-detecting prefix and file exists."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "cat.metaprompt.json").write_text(json.dumps({"prefix": "cat"}))
+        (run_dir / "cat_grammar.json").write_text(
+            json.dumps({"origin": ["#subject#"], "subject": ["dragon"]})
+        )
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.load_grammar(run_dir)  # auto-detects prefix from metadata
+
+        assert result is not None
+        assert '"origin"' in result
+        assert '"subject"' in result
+
+    def test_load_grammar_malformed_file_returns_raw_content(self, temp_dir):
+        """Test load_grammar returns file content as-is without parsing.
+
+        load_grammar is a raw read (docstring: "Grammar JSON string or None if
+        not found"); JSON validation is the route layer's job (see
+        TestUpdateGrammar::test_update_grammar_invalid_json in test_routes.py,
+        which expects a 400 from the endpoint, not from the service).
+        A service-side json.loads would raise on a corrupted-but-existing
+        file and turn a readable 200 response into a 500.
+        """
+        malformed = '{"origin": ["#subject#"], "subject": ["cat"'
+        (temp_dir / "test_grammar.json").write_text(malformed)
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.load_grammar(temp_dir, "test")
+
+        assert result == malformed
+
+    def test_get_grammar_file_explicit_prefix(self, temp_dir):
+        """Test get_grammar_file with explicit prefix returns correct path."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.get_grammar_file(run_dir, prefix="test")
+
+        assert result == run_dir / "test_grammar.json"
+
+    def test_get_grammar_file_auto_detects_prefix(self, temp_dir):
+        """Test get_grammar_file auto-detects prefix from metadata when None."""
+        (temp_dir / "cat.metaprompt.json").write_text(json.dumps({"prefix": "cat"}))
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.get_grammar_file(temp_dir)
+
+        assert result == temp_dir / "cat_grammar.json"
 
     def test_load_prompts(self, temp_dir):
         """Test loading prompts."""
@@ -190,6 +325,23 @@ class TestGalleryService:
         service = GalleryService(temp_dir, temp_dir)
         assert service.is_backup_run(temp_dir) is False
 
+    def test_is_backup_run_backup_info_without_is_backup_key(self, temp_dir):
+        """Test is_backup_run returns False when backup_info exists but lacks is_backup.
+
+        The nested .get chain (backup_info -> is_backup) must fall back to False
+        when the inner key is absent; a truthy backup_info block alone must not
+        mark a run as a backup.
+        """
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "backup_info": {
+                "source_run_id": "original",
+            },
+        }))
+
+        service = GalleryService(temp_dir, temp_dir)
+        assert service.is_backup_run(temp_dir) is False
+
     def test_count_images(self, temp_dir):
         """Test counting images."""
         (temp_dir / "test.metaprompt.json").write_text(json.dumps({"prefix": "test"}))
@@ -221,34 +373,35 @@ class TestGalleryService:
         assert images[1].name == "test_0_1.png"
         assert images[2].name == "test_1_0.png"
 
-    def test_count_images(self, temp_dir):
-        """Test counting images."""
+    def test_count_images_multi_segment(self, temp_dir):
+        """Test counting images with multi-segment prefix (files have two segments after prefix)."""
         run_dir = temp_dir / "run_dir"
         run_dir.mkdir(parents=True)
-        (run_dir / "test_01_01.png").touch()
-        (run_dir / "test_01_02.png").touch()
-        (run_dir / "test_01_03.jpg").touch()
+        # Pattern is "{prefix}_*_*.png" so files need TWO underscore-separated segments after prefix
+        (run_dir / "test_01_run_a.png").touch()
+        (run_dir / "test_01_run_b.png").touch()
+        (run_dir / "test_01_extra.jpg").touch()  # not .png — excluded
         (run_dir / "not_an_image.txt").touch()
 
         service = GalleryService(temp_dir, temp_dir)
         assert service.count_images(run_dir, prefix="test_01") == 2
 
-    def test_list_images(self, temp_dir):
-        """Test listing images."""
+    def test_list_images_multi_segment(self, temp_dir):
+        """Test listing images with multi-segment prefix (files have two segments after prefix)."""
         run_dir = temp_dir / "run_dir"
         run_dir.mkdir(parents=True)
-        (run_dir / "test_01_01.png").touch()
-        (run_dir / "test_01_02.PNG").touch() # Note: current implementation doesn't handle case
-        (run_dir / "test_01_03.jpg").touch()
+        # Pattern is "{prefix}_*_*.png" so files need TWO underscore-separated segments after prefix
+        (run_dir / "test_01_run_a.png").touch()
+        (run_dir / "test_01_run_b.PNG").touch()  # Case-sensitive glob won't match .PNG
+        (run_dir / "test_01_extra.jpg").touch()  # not .png — excluded
         (run_dir / "not_an_image.txt").touch()
 
         service = GalleryService(temp_dir, temp_dir)
         images = service.list_images(run_dir, prefix="test_01")
-        assert len(images) == 2 # Based on current implementation: .glob(f"{prefix}_*_*.png")
-        assert any(i.name == "test_01_01.png" for i in images)
-        assert any(i.name == "test_01_02.PNG" for i in images) # This might fail if glob is case sensitive
+        assert len(images) == 1  # only the lowercase .png matches
+        assert any(i.name == "test_01_run_a.png" for i in images)
 
-    def test_count_images(self, temp_dir):
+    def test_count_images_with_timestamps(self, temp_dir):
         """Test counting images."""
         run_dir = temp_dir / "run_dir"
         run_dir.mkdir(parents=True)
@@ -260,17 +413,271 @@ class TestGalleryService:
         service = GalleryService(temp_dir, temp_dir)
         assert service.count_images(run_dir, prefix="test_01") == 2
 
-    def test_list_images(self, temp_dir):
-        """Test listing images."""
-        run_dir = temp_dir / "run_dir"
-        run_dir.mkdir(parents=True)
-        (run_dir / "test_01_20240101_120000.png").touch()
-        (run_dir / "test_01_20240101_120001.PNG").touch()
-        (run_dir / "test_01_20240101_120002.jpg").touch()
-        (run_dir / "not_an_image.txt").touch()
+    def test_get_metadata_file_alternate_pattern(self, temp_dir):
+        """Test get_metadata_file returns *_metadata.json when metaprompt is absent."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "test_metadata.json").write_text(json.dumps({"prefix": "test"}))
 
         service = GalleryService(temp_dir, temp_dir)
-        images = service.list_images(run_dir, prefix="test_01")
-        # current implementation: .glob(f"{prefix}_*_*.png") which is case-sensitive
-        assert len(images) == 1 # only the first one matches
-        assert any(i.name == "test_01_20240101_120000.png" for i in images)
+        meta_file = service.get_metadata_file(run_dir)
+
+        assert meta_file.name == "test_metadata.json"
+
+    def test_count_images_zero_matches(self, temp_dir):
+        """Test count_images returns 0 when no matching images exist."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "other_0_0.png").write_bytes(b"fake")
+
+        service = GalleryService(temp_dir, temp_dir)
+        assert service.count_images(run_dir, prefix="test") == 0
+
+    def test_list_images_empty_directory(self, temp_dir):
+        """Test list_images returns empty list when no images match."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+
+        service = GalleryService(temp_dir, temp_dir)
+        assert service.list_images(run_dir, prefix="test") == []
+
+    def test_load_prompts_filters_multi_segment_stems(self, temp_dir):
+        """Test load_prompts excludes files with multiple underscores in stem."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "test_0.txt").write_text("valid")       # 1 underscore — kept
+        (run_dir / "test_a_b.txt").write_text("invalid")   # 2 underscores — filtered
+        (run_dir / "test_c_d_e.txt").write_text("filtered") # 3 underscores — filtered
+
+        service = GalleryService(temp_dir, temp_dir)
+        prompts = service.load_prompts(run_dir, prefix="test")
+
+        assert prompts == ["valid"]
+
+    def test_load_prompts_accepts_producer_prefix_with_underscores(self, temp_dir):
+        (temp_dir / "camera_study_0.txt").write_text("first")
+        (temp_dir / "camera_study_1.txt").write_text("second")
+        (temp_dir / "camera_study_raw_response.txt").write_text("not a prompt")
+        service = GalleryService(temp_dir, temp_dir)
+        assert service.load_prompts(temp_dir, prefix="camera_study") == ["first", "second"]
+
+    def test_get_metadata_file_prefers_metaprompt(self, temp_dir):
+        """Test get_metadata_file prefers *.metaprompt.json over *_metadata.json."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "test.metaprompt.json").write_text(json.dumps({"prefix": "test"}))
+        (run_dir / "test_metadata.json").write_text(json.dumps({"prefix": "test_alt"}))
+
+        service = GalleryService(temp_dir, temp_dir)
+        meta_file = service.get_metadata_file(run_dir)
+
+        assert meta_file.name == "test.metaprompt.json"
+
+    def test_get_metadata_file_fallback_to_metadata(self, temp_dir):
+        """Test get_metadata_file falls back to *_metadata.json when no metaprompt exists."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "test_metadata.json").write_text(json.dumps({"prefix": "test"}))
+
+        service = GalleryService(temp_dir, temp_dir)
+        meta_file = service.get_metadata_file(run_dir)
+
+        assert meta_file.name == "test_metadata.json"
+
+    def test_get_metadata_file_no_matching_patterns_in_existing_dir(self, temp_dir):
+        """Test get_metadata_file raises MetadataNotFoundError when no matching patterns exist."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        # Only non-matching files — neither *.metaprompt.json nor *_metadata.json
+        (run_dir / "some_other_file.txt").write_text("data")
+
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(MetadataNotFoundError, match=f"No metadata file found in {run_dir}"):
+            service.get_metadata_file(run_dir)
+
+    def test_get_metadata_file_both_patterns_match(self, temp_dir):
+        """Test get_metadata_file returns a metaprompt file when both patterns have files."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "a.metaprompt.json").write_text(json.dumps({"prefix": "mp"}))
+        (run_dir / "b.metaprompt.json").write_text(json.dumps({"prefix": "mp2"}))
+        (run_dir / "c_metadata.json").write_text(json.dumps({"prefix": "md"}))
+
+        service = GalleryService(temp_dir, temp_dir)
+        meta_file = service.get_metadata_file(run_dir)
+
+        assert meta_file.name.endswith(".metaprompt.json")
+
+    def test_load_metadata_empty_file(self, temp_dir):
+        """Test loading metadata from an empty file raises JSONDecodeError."""
+        (temp_dir / "test.metaprompt.json").write_text("")
+
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(json.JSONDecodeError):
+            service.load_metadata(temp_dir)
+
+    def test_load_metadata_empty_object(self, temp_dir):
+        """Test loading metadata from a valid empty JSON object returns empty dict."""
+        (temp_dir / "test.metaprompt.json").write_text("{}")
+
+        service = GalleryService(temp_dir, temp_dir)
+        metadata = service.load_metadata(temp_dir)
+
+        assert isinstance(metadata, dict)
+        assert metadata == {}
+        # No prefix key should fall back to default when consumed downstream,
+        # but load_metadata itself returns the raw parsed dict.
+        assert "prefix" not in metadata
+
+    def test_load_prompts_nonexistent_directory(self, temp_dir):
+        """Test load_prompts returns empty list for missing directory."""
+        nonexistent = temp_dir / "does_not_exist"
+
+        service = GalleryService(temp_dir, temp_dir)
+        prompts = service.load_prompts(nonexistent)
+        assert prompts == []
+
+    def test_validate_file_access_absolute_path_outside_base(self, temp_dir):
+        """Test validate_file_access raises ValueError for absolute paths outside base."""
+        real_root = Path("/tmp")
+
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(ValueError, match="Access denied"):
+            service.validate_file_access(real_root.resolve(), temp_dir)
+
+    def test_validate_file_access_symlink_targeting_inside_base(self, temp_dir):
+        """Test validate_file_access allows symlinks whose resolved target is inside base dir."""
+        import os
+
+        # Create a real file inside temp_dir
+        subdir = temp_dir / "subdir"
+        subdir.mkdir()
+        target_file = subdir / "real.txt"
+        target_file.touch()
+
+        # Create a symlink inside temp_dir pointing to the same target
+        link_path = temp_dir / "link_to_subdir"
+        os.symlink(subdir, link_path)
+        resolved_link = link_path.resolve(strict=True)
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.validate_file_access(resolved_link, temp_dir)
+
+        assert result is True
+
+    def test_validate_file_access_at_base_boundary(self, temp_dir):
+        """Test validate_file_access accepts paths exactly at the base directory root."""
+        file_path = temp_dir / "file.txt"
+        file_path.touch()
+
+        service = GalleryService(temp_dir, temp_dir)
+        result = service.validate_file_access(file_path, temp_dir)
+
+        assert result is True
+
+    def test_validate_file_access_nested_deep_traversal(self, temp_dir):
+        """Test validate_file_access rejects paths that escape via ../ in deep nesting."""
+        inside_dir = temp_dir / "deep" / "nested"
+        inside_dir.mkdir(parents=True)
+        safe_file = inside_dir / "safe.txt"
+        safe_file.touch()
+
+        outside_path = (temp_dir / ".." / "etc" / "passwd").resolve()
+
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(ValueError, match="Access denied"):
+            service.validate_file_access(outside_path, temp_dir)
+
+    def test_validate_file_access_symlink_targeting_outside_base(self, temp_dir):
+        """Test validate_file_access rejects a symlink that resolves outside base dir.
+
+        The guard resolves the path (Path.resolve follows symlinks) before the
+        containment check, so a link entry that exists inside base/ but points
+        at a directory outside must raise. A plain lexical relative_to check
+        would let such a symlink through, so the existing tests (which pass
+        lexically-inside or already-resolved paths) do not prove the
+        resolve-based guard.
+        """
+        import os
+
+        base_dir = temp_dir / "base"
+        base_dir.mkdir()
+        # A real directory that exists but lives OUTSIDE base/.
+        outside = temp_dir / "outside_dir"
+        outside.mkdir()
+        # A symlink inside base/ pointing at the outside directory.
+        link_path = base_dir / "link_to_outside"
+        os.symlink(outside, link_path)
+
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(ValueError, match="Access denied"):
+            service.validate_file_access(link_path, base_dir)
+
+
+class TestRunSummary:
+    """Tests for get_run_summary."""
+
+    def test_get_run_summary(self, temp_dir):
+        """Test getting a run summary with all fields populated."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "test.metaprompt.json").write_text(json.dumps({"prefix": "test"}))
+        (run_dir / "test_0.txt").write_text("prompt 1")
+        (run_dir / "test_1.txt").write_text("prompt 2")
+        (run_dir / "test_0_0.png").write_bytes(b"fake")
+        (run_dir / "test_0_1.png").write_bytes(b"fake")
+
+        service = GalleryService(temp_dir, temp_dir)
+        summary = service.get_run_summary("run")
+
+        assert summary["prefix"] == "test"
+        assert summary["prompt_count"] == 2
+        assert summary["image_count"] == 2
+        assert summary["is_backup"] is False
+
+    def test_get_run_summary_missing_directory(self, temp_dir):
+        """Test get_run_summary raises GalleryNotFoundError for missing run."""
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(GalleryNotFoundError):
+            service.get_run_summary("nonexistent")
+
+    def test_get_run_summary_default_prefix(self, temp_dir):
+        """Test get_run_summary uses default prefix when no metadata."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "image_0.txt").write_text("prompt")
+        (run_dir / "image_0_0.png").write_bytes(b"fake")
+
+        service = GalleryService(temp_dir, temp_dir)
+        summary = service.get_run_summary("run")
+
+        assert summary["prefix"] == "image"
+        assert summary["prompt_count"] == 1
+        assert summary["image_count"] == 1
+
+    def test_get_run_summary_is_backup(self, temp_dir):
+        """Test get_run_summary reports backup status."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+        (run_dir / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "backup_info": {"is_backup": True},
+        }))
+
+        service = GalleryService(temp_dir, temp_dir)
+        summary = service.get_run_summary("run")
+
+        assert summary["is_backup"] is True
+
+    def test_get_run_summary_empty_existing_directory(self, temp_dir):
+        """Test get_run_summary with an existing but empty run directory (no metadata)."""
+        run_dir = temp_dir / "run"
+        run_dir.mkdir()
+
+        service = GalleryService(temp_dir, temp_dir)
+        summary = service.get_run_summary("run")
+
+        assert summary["prefix"] == "image"
+        assert summary["prompt_count"] == 0
+        assert summary["image_count"] == 0
+        assert summary["is_backup"] is False

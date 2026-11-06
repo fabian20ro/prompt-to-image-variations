@@ -7,11 +7,23 @@ from unittest.mock import patch, MagicMock
 import pytest
 from click.testing import CliRunner
 
-from cli import main, clean_generated, cli_progress
+from config import settings
+from cli import main, clean_generated, cli_progress, _status_echo, list_generated
+from metadata_manager import MetadataManager, RunMetadata
+
+
+class TestStatusEcho:
+    """Tests for the _status_echo helper (info messages go to stderr)."""
+
+    def test_status_echo_to_stderr(self, capsys):
+        """Test that info messages are written to stderr."""
+        _status_echo("status message")
+        captured = capsys.readouterr()
+        assert "status message" in captured.err
+        assert captured.out == ""
 
 
 class TestCleanGenerated:
-    """Tests for the clean_generated function."""
 
     def test_clean_removes_files(self, temp_dir):
         """Test that clean removes generated files."""
@@ -89,6 +101,433 @@ class TestCliCleanCommand:
             assert "Cleaned 5 items" in result.output
             mock_clean.assert_called_once()
 
+    def test_clean_empty_nothing_to_print(self):
+        """Test --clean with no files prints a friendly message."""
+        runner = CliRunner()
+        with patch("cli.clean_generated", return_value=0) as mock_clean:
+            result = runner.invoke(main, ["--clean"])
+            assert result.exit_code == 0
+            assert "Nothing to clean." in result.output
+            assert "Cleaned 0 items" not in result.output
+            mock_clean.assert_called_once()
+
+    def test_clean_quiet_no_output(self):
+        """Test --clean with --quiet suppresses all output."""
+        runner = CliRunner()
+        with patch("cli.clean_generated", return_value=3) as mock_clean:
+            result = runner.invoke(main, ["--clean", "--quiet"])
+            assert result.exit_code == 0
+            assert "Cleaned" not in result.output
+            assert "Nothing to clean." not in result.output
+
+    def test_clean_json_outputs_machine_readable_summary(self):
+        """Test --clean --json emits a machine-readable JSON summary with cleaned_count."""
+        runner = CliRunner()
+        with patch("cli.clean_generated", return_value=3) as mock_clean:
+            result = runner.invoke(main, ["--clean", "--json"])
+            assert result.exit_code == 0
+            json_start = result.output.find("{")
+            assert json_start >= 0
+            parsed = json.loads(result.output[json_start:])
+            assert parsed["success"] is True
+            assert parsed["cleaned_count"] == 3
+            mock_clean.assert_called_once()
+
+
+class TestCliListCommand:
+    """Tests for --list flag (read-only inspection of generated runs)."""
+
+    @pytest.mark.parametrize("arguments", [["--list"], ["--list", "--json"]])
+    def test_list_counts_generated_prompts_not_pipeline_sidecars(self, temp_dir, arguments):
+        prompts = temp_dir / "prompts"
+        run = prompts / "run"
+        run.mkdir(parents=True)
+        # Literal producer artifacts; metadata count is intended, not present.
+        for name in ("camera_study_0.txt", "camera_study_1.txt",
+                     "camera_study_raw_response.txt", "camera_study_0_0.png",
+                     "camera_study_grammar.json", "camera_study_gallery.html"):
+            (run / name).write_text("fixture")
+        (run / "camera_study.metaprompt.json").write_text(json.dumps(
+            {"prefix": "camera_study", "count": 99}))
+        before = {path.name: path.read_bytes() for path in run.iterdir()}
+        with patch("cli.paths") as configured:
+            configured.prompts_dir = prompts
+            result = CliRunner().invoke(main, arguments)
+        assert result.exit_code == 0
+        if "--json" in arguments:
+            assert json.loads(result.output) == [
+                {"run_id": "run", "prompt_count": 2, "image_count": 1,
+                 "user_prompt": None}]
+        else:
+            assert result.output == "run: 2 prompts, 1 image\nTotal: 1 run, 2 prompts, 1 image\n"
+        assert {path.name: path.read_bytes() for path in run.iterdir()} == before
+
+    def test_list_nonexistent_dir_no_runs(self, temp_dir):
+        """Test --list with a nonexistent prompts directory prints 'No runs found.' and exits 0."""
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "does_not_exist"
+            result = runner.invoke(main, ["--list"])
+        assert result.exit_code == 0
+        assert "No runs found." in result.output
+
+    @pytest.mark.parametrize("metadata", [None, "{}", "incomplete JSON", "null", '{"prefix": []}'])
+    def test_list_partial_run_excludes_raw_response_without_losing_legacy_text(self, temp_dir, metadata):
+        run = temp_dir / "partial"
+        run.mkdir()
+        (run / "p1.txt").write_text("prompt")
+        (run / "image_raw_response.txt").write_text("raw")
+        (run / "image_1.txt").mkdir()
+        if metadata is not None:
+            (run / "image.metaprompt.json").write_text(metadata)
+        with patch("cli.paths") as configured:
+            configured.prompts_dir = temp_dir
+            result = CliRunner().invoke(main, ["--list", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output) == [
+            {"run_id": "partial", "prompt_count": 1, "image_count": 0,
+             "user_prompt": None}]
+
+    def test_list_empty_dir_no_runs(self, temp_dir):
+        """Test --list with an empty prompts directory prints 'No runs found.' and exits 0."""
+        prompts = temp_dir / "prompts"
+        prompts.mkdir()
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+        assert result.exit_code == 0
+        assert "No runs found." in result.output
+        assert "Total" not in result.output
+
+    def test_list_runs_shows_name_and_count(self, temp_dir):
+        """Test --list prints one line per run subdirectory with its file count."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+        (prompts / "run_a" / "p2.txt").write_text("b")
+        (prompts / "run_b").mkdir()
+        (prompts / "run_b" / "p3.txt").write_text("c")
+        (prompts / "stray.txt").write_text("not a run")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert "run_a: 2 prompts" in result.output
+        assert "run_b: 1 prompts" in result.output
+        assert "stray" not in result.output
+
+    def test_list_runs_with_images_shows_singular_image(self, temp_dir):
+        """Test --list distinguishes prompt and image counts (singular for one image)."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_img").mkdir(parents=True)
+        (prompts / "run_img" / "p1.txt").write_text("a")
+        (prompts / "run_img" / "p2.txt").write_text("b")
+        (prompts / "run_img" / "p1_0.png").write_text("binary")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert "run_img: 2 prompts, 1 image" in result.output
+
+    def test_list_runs_multiple_images_plural(self, temp_dir):
+        """Test --list uses the plural noun for more than one image."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_multi").mkdir(parents=True)
+        (prompts / "run_multi" / "p1.txt").write_text("a")
+        (prompts / "run_multi" / "p1_0.png").write_text("binary")
+        (prompts / "run_multi" / "p1_1.png").write_text("binary")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert "run_multi: 1 prompts, 2 images" in result.output
+
+    def test_list_runs_text_only_no_image_suffix(self, temp_dir):
+        """Test a run with only .txt files shows prompt count and no image suffix."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_txt").mkdir(parents=True)
+        (prompts / "run_txt" / "p1.txt").write_text("a")
+        (prompts / "run_txt" / "p2.txt").write_text("b")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert "run_txt: 2 prompts" in result.output
+        assert "image" not in result.output
+
+    def test_list_summary_totals_across_runs(self, temp_dir):
+        """Test --list prints an aggregate Total line after the per-run lines."""
+        prompts = temp_dir / "prompts"
+        run_a = prompts / "run_a"
+        run_a.mkdir(parents=True)
+        (run_a / "p1.txt").write_text("a")
+        (run_a / "p2.txt").write_text("b")
+        (run_a / "p1_0.png").write_text("binary")
+        run_b = prompts / "run_b"
+        run_b.mkdir()
+        (run_b / "p3.txt").write_text("c")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "run_a: 2 prompts, 1 image\n"
+            "run_b: 1 prompts\n"
+            "Total: 2 runs, 3 prompts, 1 image\n"
+        )
+
+    def test_list_summary_totals_plural_images(self, temp_dir):
+        """Test the aggregate Total line pluralizes 'images' for three or more."""
+        prompts = temp_dir / "prompts"
+        for name in ("run_1", "run_2", "run_3"):
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("x")
+            (run / "p1_0.png").write_text("binary")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "run_1: 1 prompts, 1 image\n"
+            "run_2: 1 prompts, 1 image\n"
+            "run_3: 1 prompts, 1 image\n"
+            "Total: 3 runs, 3 prompts, 3 images\n"
+        )
+
+    def test_list_full_shows_untruncated_prompt(self, temp_dir):
+        """Test --list --full shows the complete user prompt; without --full it truncates at 60 chars."""
+        long_prompt = "a" * 100
+        run = temp_dir / "prompts" / "run"
+        run.mkdir(parents=True)
+        (run / "prompt_0.txt").write_text("a")
+        (run / "prompt.metaprompt.json").write_text(
+            json.dumps({"prefix": "prompt", "count": 1, "user_prompt": long_prompt})
+        )
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "prompts"
+            result = runner.invoke(main, ["--list"])
+            assert result.exit_code == 0
+            assert f"run: 1 prompts ({long_prompt[:60]}...)" in result.output
+            assert long_prompt not in result.output
+            result = runner.invoke(main, ["--list", "--full"])
+            assert result.exit_code == 0
+            assert f"run: 1 prompts ({long_prompt})" in result.output
+
+    def test_list_json_with_images_counts_by_type(self, temp_dir):
+        """Test --list --json reports prompt_count and image_count per file type."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_img").mkdir(parents=True)
+        (prompts / "run_img" / "p1.txt").write_text("a")
+        (prompts / "run_img" / "p2.txt").write_text("b")
+        (prompts / "run_img" / "p1_0.png").write_text("binary")
+        (prompts / "run_img" / "p2_0.png").write_text("binary")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        entry = next(e for e in parsed if e["run_id"] == "run_img")
+        assert entry["prompt_count"] == 2
+        assert entry["image_count"] == 2
+
+    def test_list_json_outputs_array(self, temp_dir):
+        """Test --list --json emits a valid JSON array with run_id and prompt_count."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+        (prompts / "run_a" / "p2.txt").write_text("b")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert isinstance(parsed, list)
+        assert {"run_id": "run_a", "prompt_count": 2, "image_count": 0,
+                "user_prompt": None} in parsed
+        for entry in parsed:
+            assert isinstance(entry["run_id"], str)
+            assert isinstance(entry["prompt_count"], int)
+            assert isinstance(entry["image_count"], int)
+
+    @patch("cli.PipelineExecutor")
+    @patch("cli.check_lm_studio")
+    def test_list_does_not_run_pipeline(self, mock_check, mock_executor_cls):
+        """Test --list is read-only: no LM Studio connection and no pipeline execution."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--list"])
+        assert result.exit_code == 0
+        mock_check.assert_not_called()
+        mock_executor_cls.assert_not_called()
+        assert "Generating grammar" not in result.output
+
+    def test_list_generated_reads_prompts_dir_not_grammars_dir(self, temp_dir, capsys):
+        """Regression: list_generated must read prompts_dir, not grammars_dir."""
+        grammars = temp_dir / "grammars"
+        prompts = temp_dir / "prompts"
+        (grammars / "run_a").mkdir(parents=True)
+        (grammars / "run_a" / "g.json").write_text("{}")
+        (prompts / "run_b").mkdir(parents=True)
+        (prompts / "run_b" / "p.txt").write_text("x")
+
+        with patch("cli.paths") as mock_paths:
+            mock_paths.grammars_dir = grammars
+            mock_paths.prompts_dir = prompts
+            list_generated()
+
+        captured = capsys.readouterr()
+        assert "run_b" in captured.out
+        assert "run_a" not in captured.out
+
+    def test_list_quiet_is_silent(self, temp_dir):
+        """Test --list --quiet suppresses all output, with and without runs."""
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = temp_dir / "does_not_exist"
+            result = runner.invoke(main, ["--list", "--quiet"])
+        assert result.exit_code == 0
+        assert result.output == ""
+
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+        (prompts / "run_a" / "p2.txt").write_text("b")
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--quiet"])
+        assert result.exit_code == 0
+        assert result.output == ""
+
+    def test_list_json_includes_user_prompt(self, temp_dir):
+        """Test --list --json surfaces the original user prompt from metaprompt.json."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run_sunset"
+        run.mkdir(parents=True)
+        (run / "p1.txt").write_text("a")
+        (run / "image.metaprompt.json").write_text(json.dumps(
+            {"prefix": "image", "count": 1, "user_prompt": "sunset beach"}))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        entry = next(e for e in parsed if e["run_id"] == "run_sunset")
+        assert entry["user_prompt"] == "sunset beach"
+
+    @pytest.mark.parametrize("metadata,expected", [
+        ({"prompt": 'Legacy ș 🌈\n"raw"'}, 'Legacy ș 🌈\n"raw"'),
+        ({"user_prompt": 23, "prompt": "Legacy"}, "Legacy"),
+        ({"user_prompt": "", "prompt": "Legacy"}, ""),
+        (RunMetadata(count=99, user_prompt='Știință 🌈\n"raw"'), 'Știință 🌈\n"raw"'),
+        ({"user_prompt": "Modern", "prompt": "Legacy"}, "Modern"),
+        ({"user_prompt": "  \t\n", "prompt": "Legacy"}, "  \t\n"),
+        ({"user_prompt": None, "prompt": "Legacy"}, "Legacy"),
+        ({"user_prompt": False, "prompt": "Legacy"}, "Legacy"),
+        ({"user_prompt": [], "prompt": "Legacy"}, "Legacy"),
+        ({"user_prompt": {}, "prompt": "Legacy"}, "Legacy"),
+        ({"prompt": ""}, ""),
+        ({"user_prompt": None, "prompt": ""}, ""),
+        ({"user_prompt": 23, "prompt": False}, None),
+        ({}, None),
+    ], ids=["legacy", "invalid-modern", "empty-string", "producer", "precedence",
+            "whitespace", "null-modern", "bool-modern", "list-modern", "object-modern",
+            "empty-legacy", "null-modern-empty-legacy", "neither-string", "absent-fields"])
+    def test_list_json_preserves_first_string_from_producer_or_legacy(self, temp_dir, metadata, expected):
+        run = temp_dir / "run"
+        run.mkdir()
+        (run / "image_0.txt").write_text("generated prompt", encoding="utf-8")
+        (run / "image_raw_response.txt").write_text("not a generated prompt", encoding="utf-8")
+        (run / "result.png").write_bytes(b"counted without decoding")
+        MetadataManager.save(run, metadata)
+        before = {path.name: path.read_bytes() for path in run.iterdir()}
+        with patch("cli.paths") as configured:
+            configured.prompts_dir = temp_dir
+            result = CliRunner().invoke(main, ["--list", "--json"])
+        assert result.exit_code == 0, result.exception
+        assert json.loads(result.output) == [{
+            "run_id": "run", "prompt_count": 1, "image_count": 1, "user_prompt": expected,
+        }]
+        assert {path.name: path.read_bytes() for path in run.iterdir()} == before
+
+    def test_list_json_null_prompt_without_metadata(self, temp_dir):
+        """Test a run with no metadata file lists with user_prompt null and exits 0."""
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        entry = next(e for e in parsed if e["run_id"] == "run_a")
+        assert entry["user_prompt"] is None
+
+    def test_list_human_truncates_long_user_prompt(self, temp_dir):
+        """Test human --list truncates a long user prompt at 60 chars with an ellipsis."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run_long"
+        run.mkdir(parents=True)
+        (run / "image_1.txt").write_text("a")
+        (run / "image.metaprompt.json").write_text(json.dumps(
+            {"prefix": "image", "count": 1, "user_prompt": "x" * 80}))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == f"run_long: 1 prompts ({'x' * 60}...)\nTotal: 1 run, 1 prompts\n"
+
+    def test_list_human_empty_user_prompt_unchanged(self, temp_dir):
+        """Test human --list output is byte-identical when user_prompt is empty."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run_empty"
+        run.mkdir(parents=True)
+        (run / "image_1.txt").write_text("a")
+        (run / "image.metaprompt.json").write_text(json.dumps(
+            {"prefix": "image", "count": 1, "user_prompt": ""}))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == "run_empty: 1 prompts\nTotal: 1 run, 1 prompts\n"
+
 
 class TestCliValidation:
     """Tests for CLI argument validation."""
@@ -97,8 +536,25 @@ class TestCliValidation:
         """Test that no arguments shows error."""
         runner = CliRunner()
         result = runner.invoke(main, [])
-        assert result.exit_code != 0
-        assert "Error" in result.output
+        assert result.exit_code == 1
+        assert "Error: --prompt is required" in result.output
+
+    @patch("cli.check_lm_studio", return_value=True)
+    def test_version_check_success(self, mock_check):
+        """Test --version-check prints success and exits 0."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--version-check"])
+        assert result.exit_code == 0
+        assert "Successfully connected to LM Studio" in result.output
+        mock_check.assert_called_once_with("http://localhost:1234/v1")
+
+    @patch("cli.check_lm_studio", return_value=False)
+    def test_version_check_failure(self, mock_check):
+        """Test --version-check prints error and exits 1."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--version-check"])
+        assert result.exit_code == 1
+        assert "Error: LM Studio is not reachable" in result.output
 
     def test_from_grammar_and_from_prompts_conflict(self, temp_dir):
         """Test conflicting flags."""
@@ -168,9 +624,140 @@ class TestCliValidation:
         assert "LM Studio API base URL (default:" in result.output
         assert "http://localhost:1234/v1" in result.output
 
+    def test_prompt_ignored_with_from_grammar(self, temp_dir):
+        """Test that --prompt emits a warning (not an error) when used with --from-grammar."""
+        grammar_file = temp_dir / "test.json"
+        grammar_file.write_text('{"origin": ["a cat"]}')
 
-class TestCliDryRun:
-    """Tests for --dry-run behavior."""
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "-p", "ignored prompt",
+            "--from-grammar", str(grammar_file),
+            "--dry-run",
+        ])
+
+        assert "Warning: --prompt is ignored when using --from-grammar" in result.output
+        # Dry-run continues with the grammar file and exits 0
+        assert result.exit_code == 0
+        assert "--- Loaded Grammar ---" in result.output
+
+    def test_prompt_ignored_with_from_prompts_quiet(self, temp_dir):
+        """Test that --quiet suppresses the --prompt-ignored warning."""
+        prompts_dir = temp_dir / "prompts"
+        prompts_dir.mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "-p", "ignored prompt",
+            "--from-prompts", str(prompts_dir),
+            "--generate-images",
+            "--quiet",
+        ])
+
+        assert "Warning" not in result.output
+        assert "--prompt is ignored" not in result.output
+
+    def test_prompt_ignored_with_from_prompts_not_quiet(self, temp_dir):
+        """Test that without --quiet the warning about ignoring --prompt appears."""
+        prompts_dir = temp_dir / "prompts"
+        prompts_dir.mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "-p", "ignored prompt",
+            "--from-prompts", str(prompts_dir),
+            "--generate-images",
+        ])
+
+        assert "prompt is ignored" in result.output
+
+    @patch("cli.PipelineExecutor")
+    def test_json_output_shape_on_success(self, mock_executor_cls):
+        """Test --json outputs valid JSON with expected keys on pipeline success."""
+        runner = CliRunner()
+
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/test_run")
+        mock_result.prompt_count = 5
+        mock_result.image_count = 10
+        mock_result.skipped_count = 2
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        result = runner.invoke(main, [
+            "--prompt", "a cat", "--json",
+        ])
+
+        assert result.exit_code == 0
+        json_start = result.output.find("{")
+        parsed = json.loads(result.output[json_start:])
+        assert parsed["success"] is True
+        assert parsed["prompt_count"] == 5
+        assert parsed["image_count"] == 10
+        assert parsed["skipped_count"] == 2
+        assert "output_dir" in parsed
+
+    @patch("cli.PipelineExecutor")
+    def test_json_output_omits_empty_fields(self, mock_executor_cls):
+        """Test --json uses None when output_dir is missing (produces null)."""
+        runner = CliRunner()
+
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = None
+        mock_result.prompt_count = 1
+        mock_result.image_count = 0
+        mock_result.skipped_count = 0
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        result = runner.invoke(main, [
+            "--prompt", "a cat", "--json",
+        ])
+
+        assert result.exit_code == 0
+        json_start = result.output.find("{")
+        parsed = json.loads(result.output[json_start:])
+        assert parsed["output_dir"] is None
+
+
+class TestCliEnhanceImages:
+    """Tests for --enhance-images flag."""
+
+    @patch("image_enhancer.collect_images")
+    def test_enhance_images_error(self, mock_collect):
+        """Test --enhance-images with an invalid path raises a user-facing error."""
+        from image_enhancer import collect_images
+
+        mock_collect.side_effect = ValueError(
+            "No images found matching pattern: /nonexistent/path"
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, ["--enhance-images", "/nonexistent/path"])
+        assert result.exit_code != 0
+        assert (
+            'Error: No images found matching pattern: /nonexistent/path' in result.output
+        )
+
+    def test_dry_run_from_grammar(self, temp_dir):
+        """Test --dry-run with an existing grammar file."""
+        grammar_file = temp_dir / "test.json"
+        grammar_content = '{"origin": ["test_grammar"]}'
+        grammar_file.write_text(grammar_content)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["--from-grammar", str(grammar_file), "--dry-run"])
+
+        assert result.exit_code == 0
+        assert f"Loading grammar from: {grammar_file}" in result.output
+        assert "--- Loaded Grammar ---" in result.output
+        assert grammar_content in result.output
+        assert "--- End Grammar ---" in result.output
 
     @patch("cli.generate_grammar")
     @patch("cli.PipelineExecutor")
@@ -193,6 +780,309 @@ class TestCliDryRun:
             height=1152,
         )
         mock_executor_cls.assert_not_called()
+
+    @patch("cli.generate_grammar")
+    def test_dry_run_grammar_failure(self, mock_generate_grammar):
+        """Test --dry-run surfaces grammar errors with helpful message and exits 1."""
+
+        error_msg = "LM Studio connection refused"
+        mock_generate_grammar.side_effect = ConnectionError(error_msg)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["-p", "a cat", "--dry-run"], catch_exceptions=False
+        )
+
+        assert result.exit_code == 1
+        assert f"Error generating grammar: {error_msg}" in result.output
+        assert "Make sure LM Studio is running at http://localhost:1234/v1" in result.output
+
+    @patch("cli.generate_grammar")
+    def test_dry_run_keyboard_interrupt(self, mock_generate_grammar):
+        """Test --dry-run propagates Ctrl+C with exit 130 and 'Interrupted.' message."""
+
+        mock_generate_grammar.side_effect = KeyboardInterrupt()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["-p", "a cat", "--dry-run"], catch_exceptions=False
+        )
+
+        assert result.exit_code == 130
+        assert "Interrupted." in result.output
+        # Should NOT show the LM Studio error message
+        assert "Make sure LM Studio is running" not in result.output
+
+
+class TestReadPromptFromStdin:
+    """Tests for _read_prompt_from_stdin function."""
+
+    def test_keyboard_interrupt_exits_130(self):
+        """Test KeyboardInterrupt during stdin read exits with code 130 and prints 'Interrupted.'"""
+        import sys as _sys
+        from click.testing import CliRunner
+
+        runner = CliRunner()
+
+        # Use monkeypatch to simulate Ctrl+C on stdin.read()
+        def raise_keyboard_interrupt():
+            raise KeyboardInterrupt()
+
+        class FakeStdin:
+            @staticmethod
+            def read():
+                raise KeyboardInterrupt()
+
+        with patch("sys.stdin", FakeStdin()):
+            # Test _read_prompt_from_stdin directly by mocking sys.exit to capture behavior
+            exit_code = []
+
+            def mock_exit(code):
+                exit_code.append(code)
+
+            import cli as cli_mod
+            with patch.object(_sys, "exit", side_effect=mock_exit), \
+                 patch("cli.click.echo") as mock_echo:
+                result = cli_mod._read_prompt_from_stdin("-")
+
+        assert len(exit_code) == 1
+        assert exit_code[0] == 130
+
+    @patch("cli.generate_grammar")
+    def test_dry_run_non_connectivity_error_no_lm_hint(self, mock_generate_grammar):
+        """Test non-connectivity errors (e.g. JSON parse failures) do NOT show the LM Studio hint."""
+
+        error_msg = "Grammar is not valid JSON"
+        mock_generate_grammar.side_effect = ValueError(error_msg)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["-p", "a cat", "--dry-run"], catch_exceptions=False
+        )
+
+        assert result.exit_code == 1
+        assert f"Error generating grammar: {error_msg}" in result.output
+        # Should NOT show the LM Studio hint — this is not a connectivity issue
+        assert "Make sure LM Studio is running" not in result.output
+
+    @patch("cli.generate_grammar")
+    def test_dry_run_timeout_error_shows_lm_hint(self, mock_generate_grammar):
+        """Test TimeoutError surfaces with the LM Studio hint."""
+
+        error_msg = "Connection timed out after 30s"
+        mock_generate_grammar.side_effect = TimeoutError(error_msg)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["-p", "a cat", "--dry-run"], catch_exceptions=False
+        )
+
+        assert result.exit_code == 1
+        assert f"Error generating grammar: {error_msg}" in result.output
+        assert "Make sure LM Studio is running at http://localhost:1234/v1" in result.output
+
+    @patch("cli.generate_grammar")
+    def test_dry_run_cached_grammar_message(self, mock_generate_grammar):
+        """Test --dry-run prints 'Using cached grammar' when grammar was served from cache."""
+        mock_generate_grammar.return_value = ('{"origin": ["cached_cat"]}', True, None)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "Using cached grammar" in result.output
+        assert '{"origin": ["cached_cat"]}' in result.output
+
+    def test_enhance_images_success(self, tmp_path):
+        """Test --enhance-images invokes enhancement for each image and prints summary."""
+        from pathlib import Path
+
+        fake_img1 = tmp_path / "test_0.png"
+        fake_img2 = tmp_path / "test_1.png"
+        fake_img1.touch()
+        fake_img2.touch()
+
+        class MockProgressBar:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def __iter__(self):
+                for item in [fake_img1, fake_img2]: yield item
+            def write(self, s): pass
+
+        with patch("cli.collect_images", return_value=[fake_img1, fake_img2]), \
+             patch("cli.enhance_image") as mock_enhance, \
+             patch("click.progressbar", MockProgressBar):
+            runner = CliRunner()
+            result = runner.invoke(main, ["--enhance-images", "/some/path"])
+
+            assert result.exit_code == 0
+            assert "Collecting images from: /some/path" in result.output
+            assert "Enhanced 2 images" in result.output
+            assert mock_enhance.call_count == 2
+            # Seed is None by default, so no seed increment expected
+            for call in mock_enhance.call_args_list:
+                kwargs = call.kwargs if hasattr(call, 'kwargs') else call[1]
+                assert kwargs.get("seed") is None
+
+    def test_enhance_images_seed_increments(self, tmp_path):
+        """Test --enhance-images increments seed per image when provided."""
+        from pathlib import Path
+
+        fake_img = tmp_path / "test.png"
+        fake_img.touch()
+
+        class MockProgressBar:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def __iter__(self):
+                for item in [fake_img] * 3: yield item
+            def write(self, s): pass
+
+        with patch("cli.collect_images", return_value=[fake_img] * 3), \
+             patch("cli.enhance_image") as mock_enhance, \
+             patch("click.progressbar", MockProgressBar):
+            runner = CliRunner()
+            result = runner.invoke(main, ["--enhance-images", "/some/path", "--seed", "42"])
+
+            assert result.exit_code == 0
+            # Verify seed increments across calls: 42, 43, 44
+            seeds = [call.kwargs.get("seed") for call in mock_enhance.call_args_list]
+            assert seeds == [42, 43, 44]
+
+    def test_enhance_images_import_error_exits_1(self, tmp_path):
+        """Test --enhance-images exits 1 with the ImportError message (not the generic error)."""
+        fake_img = tmp_path / "test.png"
+        fake_img.touch()
+
+        class MockProgressBar:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def __iter__(self):
+                yield fake_img
+            def write(self, s): pass
+
+        with patch("cli.collect_images", return_value=[fake_img]), \
+             patch("cli.enhance_image", side_effect=ImportError("mflux is not installed")), \
+             patch("click.progressbar", MockProgressBar):
+            runner = CliRunner()
+            result = runner.invoke(main, ["--enhance-images", "/some/path"])
+
+            assert result.exit_code == 1
+            assert "Error: mflux is not installed" in result.output
+            # The ImportError branch must not use the generic "Error enhancing image:" prefix
+            assert "Error enhancing image:" not in result.output
+            # Failure must abort before the success summary
+            assert "Enhanced 1 images" not in result.output
+
+    def test_enhance_images_generic_error_exits_1(self, tmp_path):
+        """Test --enhance-images exits 1 with 'Error enhancing image:' for non-ImportError failures."""
+        fake_img = tmp_path / "test.png"
+        fake_img.touch()
+
+        class MockProgressBar:
+            def __init__(self, *args, **kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def __iter__(self):
+                yield fake_img
+            def write(self, s): pass
+
+        with patch("cli.collect_images", return_value=[fake_img]), \
+             patch("cli.enhance_image", side_effect=RuntimeError("out of memory")), \
+             patch("click.progressbar", MockProgressBar):
+            runner = CliRunner()
+            result = runner.invoke(main, ["--enhance-images", "/some/path"])
+
+            assert result.exit_code == 1
+            assert "Error enhancing image: out of memory" in result.output
+            # Failure must abort before the success summary
+            assert "Enhanced 1 images" not in result.output
+
+
+class TestStdinPrompt:
+    """Tests for --prompt - (read prompt from stdin)."""
+
+    def test_stdin_prompt_reads_from_stdin(self, monkeypatch):
+        """Test that '--prompt -' reads the prompt from stdin."""
+        runner = CliRunner()
+
+        # Mock generate_grammar to avoid needing LM Studio
+        with patch("cli.generate_grammar", return_value=('{\"origin":["test"]}', False, None)):
+            result = runner.invoke(
+                main, ["--prompt", "-", "--dry-run"], input="a cat from stdin\n"
+            )
+
+        assert result.exit_code == 0
+        assert "a cat from stdin" in result.output
+        assert "{origin: [\"test\"]}" not in result.output  # Just verifying it got the prompt text through
+
+    def test_stdin_empty_prompt_errors(self, monkeypatch):
+        """Test that empty stdin gives an error with exit code 1 and stderr message."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--prompt", "-"], input="")
+
+        assert result.exit_code == 1
+        captured = result.output.splitlines()
+        # click.echo(err=True) writes to stderr; CliRunner captures it in .output
+        assert any("Error: empty prompt read from stdin" in line for line in captured)
+
+    def test_stdin_with_full_pipeline(self, monkeypatch):
+        """Test that stdin works with the full pipeline."""
+        runner = CliRunner()
+
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/test")
+        mock_result.prompt_count = 1
+        mock_result.image_count = 0
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        monkeypatch.setattr("cli.PipelineExecutor", lambda **kw: mock_executor)
+
+        result = runner.invoke(
+            main, ["--prompt", "-"], input="a prompt from stdin\n"
+        )
+
+        assert result.exit_code == 0
+        call_args = mock_executor.run_full_pipeline.call_args
+        assert call_args.kwargs["prompt"] == "a prompt from stdin"
+
+
+class TestCliDryRunValidation:
+    """Tests for dry-run argument validation."""
+
+    def test_dry_run_without_prompt_or_grammar_exits_1(self):
+        """Test --dry-run without --prompt or --from-grammar hits the dry-run-specific error message."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--dry-run"])
+
+        assert result.exit_code == 1
+        # The specific _run_dry_run branch (line 509-511) prints its own error, not generic validation.
+        assert "Error: --prompt is required for --dry-run" in result.output
+
+
+class TestCliInputValidation:
+    """Tests for generic input validation in main()."""
+
+    def test_no_mode_flags_exits_1(self):
+        """Test that running with no prompt/mode flags exits 1 with the generic required message."""
+        runner = CliRunner()
+        result = runner.invoke(main, [])
+
+        assert result.exit_code == 1
+        assert "Error: --prompt is required" in result.output
+
+    def test_temperature_out_of_range_rejected(self):
+        """Test that --temperature outside [0.0, 2.0] is rejected with exit code 2 before any pipeline work."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat", "--temperature", "5.0"])
+
+        assert result.exit_code == 2
+        assert "temperature must be between 0.0 and 2.0" in result.output
 
 
 class TestCliServe:
@@ -247,6 +1137,9 @@ class TestCliFullPipeline:
 
         assert result.exit_code == 0
         mock_executor.run_full_pipeline.assert_called_once()
+        assert "Generated 5 prompts in: /tmp/test" in result.output
+        # image_count == 0 (prompt-only run) must not print an image summary line
+        assert "Generated 0 images" not in result.output
 
     @patch("cli.PipelineExecutor")
     def test_prompt_with_dimensions(self, mock_executor_cls):
@@ -274,3 +1167,291 @@ class TestCliFullPipeline:
         args, kwargs = mock_executor.run_full_pipeline.call_args
         assert kwargs["width"] == 1024
         assert kwargs["height"] == 768
+
+    @patch("cli.PipelineExecutor")
+    def test_pipeline_failure_exits_1(self, mock_executor_cls):
+        """Test that a failed pipeline result exits with code 1 and prints the error."""
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = False
+        mock_result.error = "Grammar generation timed out"
+
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat", "-n", "5"])
+
+        assert result.exit_code == 1
+        assert "Error: Grammar generation timed out" in result.output
+        # No summary should be printed on failure
+        assert "Generated" not in result.output
+        mock_executor.run_full_pipeline.assert_called_once()
+
+    @patch("cli.PipelineExecutor")
+    def test_from_grammar_calls_run_from_grammar(self, mock_executor_cls, tmp_path):
+        """Test that --from-grammar invokes run_from_grammar with correct args."""
+        import json as _json
+
+        grammar_file = tmp_path / "test_grammar.json"
+        grammar_file.write_text(_json.dumps({"origin": ["test"]}))
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/out")
+        mock_result.prompt_count = 10
+        mock_result.image_count = 5
+        mock_result.skipped_count = 0
+        mock_result.error = None
+
+        mock_executor_cls.return_value.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value.run_from_grammar.return_value = mock_result
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["--from-grammar", str(grammar_file), "-n", "10"]
+        )
+
+        assert result.exit_code == 0
+        mock_executor_cls.assert_called_once_with(on_progress=cli_progress)
+        call_kwargs = mock_executor_cls.return_value.run_from_grammar.call_args.kwargs
+        assert call_kwargs["grammar_path"] == grammar_file
+        assert call_kwargs["count"] == 10
+
+    @patch("cli.PipelineExecutor")
+    def test_from_prompts_calls_run_from_prompts(self, mock_executor_cls, tmp_path):
+        """Test that --from-prompts + --generate-images invokes run_from_prompts."""
+        prompts_dir = tmp_path
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/out")
+        mock_result.prompt_count = 5
+        mock_result.image_count = 5
+        mock_result.skipped_count = 0
+        mock_result.error = None
+
+        mock_executor_cls.return_value.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value.run_from_prompts.return_value = mock_result
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "--from-prompts", str(prompts_dir),
+                "--generate-images",
+                "--images-per-prompt", "2",
+                "--width", "1024",
+                "--height", "768",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mock_executor_cls.assert_called_once_with(on_progress=cli_progress)
+        call_kwargs = mock_executor_cls.return_value.run_from_prompts.call_args.kwargs
+        assert call_kwargs["prompts_dir"] == prompts_dir
+        assert call_kwargs["images_per_prompt"] == 2
+        assert call_kwargs["width"] == 1024
+        assert call_kwargs["height"] == 768
+
+    @patch("cli.PipelineExecutor")
+    def test_default_prefix_and_dimensions(self, mock_executor_cls):
+        """"Test that --prompt without explicit prefix/width/height passes CLI defaults to the executor."""
+        from config import settings
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/test")
+        mock_result.prompt_count = 50
+        mock_result.image_count = 0
+        mock_result.skipped_count = 0
+        mock_result.error = None
+
+        mock_executor_cls.return_value.run_full_pipeline.return_value = mock_result
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat"])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_executor_cls.return_value.run_full_pipeline.call_args.kwargs
+        # CLI default: prefix = prefix or "image"
+        assert call_kwargs["prefix"] == "image"
+        # Width/height fall back to config defaults (not from_env overrides)
+        assert call_kwargs["width"] == settings.image_generation.default_width
+        assert call_kwargs["height"] == settings.image_generation.default_height
+        assert call_kwargs["seed"] is None
+        assert call_kwargs["max_prompts"] is None
+
+    @patch("cli.PipelineExecutor")
+    def test_skipped_images_message_when_both_counts_positive(self, mock_executor_cls):
+        """Test that CLI prints 'skipped N existing' when image_count and skipped_count are both > 0."""
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/test")
+        mock_result.prompt_count = 10
+        mock_result.image_count = 8
+        mock_result.skipped_count = 2
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat", "-n", "10", "--generate-images"])
+
+        assert result.exit_code == 0
+        assert "Generated 8 images, skipped 2 existing" in result.output
+
+    @patch("cli.PipelineExecutor")
+    def test_no_skipped_message_when_all_images_new(self, mock_executor_cls):
+        """Test that CLI does NOT print 'skipped N existing' when all images are freshly generated."""
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/test")
+        mock_result.prompt_count = 10
+        mock_result.image_count = 10
+        mock_result.skipped_count = 0
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat", "-n", "10", "--generate-images"])
+
+        assert result.exit_code == 0
+        assert "skipped" not in result.output
+        assert "Generated 10 images" in result.output
+
+    @patch("cli.PipelineExecutor")
+    def test_json_flag_outputs_valid_summary(self, mock_executor_cls):
+        """Test that --json prints a valid JSON summary with expected keys.
+
+        The CLI emits status echoes (e.g. "Generating grammar for: ...") to stdout
+        before the JSON summary; extract JSON from the first brace onward.
+        """
+        import json as _json
+
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = Path("/tmp/test")
+        mock_result.prompt_count = 50
+        mock_result.image_count = 10
+        mock_result.skipped_count = 2
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat", "--json"])
+
+        assert result.exit_code == 0
+        # Extract JSON from the first '{' character (status messages precede it)
+        json_start = result.output.find("{")
+        assert json_start >= 0, f"No JSON found in output:\n{result.output}"
+
+        summary = _json.loads(result.output[json_start:])
+        assert summary["prompt_count"] == 50
+        assert summary["image_count"] == 10
+        assert summary["skipped_count"] == 2
+        assert summary["success"] is True
+        assert "output_dir" in summary
+
+    @patch("cli.PipelineExecutor")
+    def test_json_output_nulls_output_dir(self, mock_executor_cls):
+        """Test that --json serializes null output_dir as JSON null (no crash)."""
+        import json as _json
+
+        mock_executor = MagicMock()
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output_dir = None  # Unset output dir
+        mock_result.prompt_count = 30
+        mock_result.image_count = 5
+        mock_result.skipped_count = 0
+        mock_result.error = None
+        mock_executor.run_full_pipeline.return_value = mock_result
+        mock_executor_cls.return_value = mock_executor
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["-p", "a cat", "--json"])
+
+        assert result.exit_code == 0
+        json_start = result.output.find("{")
+        summary = _json.loads(result.output[json_start:])
+        assert summary["output_dir"] is None
+
+
+class TestDumpConfigFlag:
+    """Tests for --dump-config flag."""
+
+    def test_dump_config_exits_0(self):
+        """Test that --dump-config exits cleanly with code 0."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--dump-config"])
+        assert result.exit_code == 0
+        assert "FLUX 3 Image Klein CLI Settings" in result.output
+
+    def test_dump_config_shows_all_sections(self):
+        """Test that --dump-config prints all four config sections."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--dump-config"])
+        assert "[LM Studio]" in result.output
+        assert "[Image Generation]" in result.output
+        assert "[Server]" in result.output
+        assert "[Enhancement]" in result.output
+
+    def test_dump_config_shows_field_names(self):
+        """Test that --dump-config prints field names for each section."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--dump-config"])
+        # LM Studio fields
+        assert "base_url" in result.output
+        assert "model" in result.output
+        assert "timeout" in result.output
+        # Image Generation fields
+        assert "default_width" in result.output
+        assert "default_height" in result.output
+        assert "seed" in result.output
+
+    def test_dump_config_with_other_flags_no_pipeline(self, capsys):
+        """Test that --dump-config does not run the pipeline even with other flags."""
+        runner = CliRunner()
+        # Pass several other flags alongside --dump-config
+        result = runner.invoke(main, [
+            "--dump-config", "-p", "a cat", "-n", "5"
+        ])
+        assert result.exit_code == 0
+        assert "FLUX 3 Image Klein CLI Settings" in result.output
+        # No pipeline output should appear
+        assert "Generating grammar for:" not in result.output
+
+    def test_dump_config_help_mentions_flag(self):
+        """Test that --help documents the --dump-config flag."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--help"])
+        assert "--dump-config" in result.output
+        assert "effective settings" in result.output or "settings" in result.output
+
+    def test_dump_config_quiet_suppresses_output(self):
+        """Test that --quiet suppresses _print_settings output."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["--dump-config", "--quiet"])
+        assert result.exit_code == 0
+        # Settings block should not appear in output when quiet is on
+        assert "FLUX 3 Image Klein CLI Settings" not in result.output
+
+    def test_print_settings_quiet_silent(self, capsys):
+        """Test that _print_settings with quiet=True prints nothing."""
+        from cli import _print_settings
+        _print_settings(quiet=True)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_print_settings_default_verbose(self, capsys):
+        """Test that _print_settings without quiet still prints settings."""
+        from cli import _print_settings
+        _print_settings(quiet=False)
+        captured = capsys.readouterr()
+        assert "FLUX 3 Image Klein CLI Settings" in captured.out

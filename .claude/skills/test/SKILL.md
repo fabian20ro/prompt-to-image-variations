@@ -8,7 +8,7 @@ allowed-tools:
 
 # Test Runner
 
-Run tests for the image-prompt-expander project.
+Run tests for the prompt-to-image-variations project.
 
 ## Usage
 

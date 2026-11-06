@@ -90,6 +90,8 @@ class RegeneratePromptsRequest(BaseModel):
 
 class RegeneratePromptsApiRequest(BaseModel):
     """API request to regenerate prompts (run_id and grammar from URL/file)."""
+    model_config = ConfigDict(extra="forbid")
+
     grammar: str | None = None
     count: int | None = Field(None, ge=1, le=10000)
     images_per_prompt: int | None = Field(None, ge=0, le=100)
@@ -98,6 +100,8 @@ class RegeneratePromptsApiRequest(BaseModel):
 
 class GrammarUpdateRequest(BaseModel):
     """Request to update a gallery's grammar."""
+    model_config = ConfigDict(extra="forbid")
+
     grammar: str
 
 
@@ -108,6 +112,8 @@ class GenerateImageRequest(BaseModel):
 
 class EnhanceImageRequest(BaseModel):
     """Request to enhance a specific image."""
+    model_config = ConfigDict(extra="forbid")
+
     image_idx: int = Field(0, ge=0, le=1000)
     softness: float = Field(0.5, ge=0.0, le=1.0)
 
@@ -151,6 +157,8 @@ class GenerateFromGrammarRequest(BaseModel):
 
 class EnhanceAllImagesRequest(BaseModel):
     """Request to enhance all images for a gallery."""
+    model_config = ConfigDict(extra="forbid")
+
     softness: float = Field(0.5, ge=0.0, le=1.0)
 
 

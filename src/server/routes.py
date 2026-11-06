@@ -125,6 +125,8 @@ async def sse_events(request: Request):
                 "event": "status",
                 "data": json.dumps({
                     "pending_count": len(state.pending),
+                    "completed_count": len(state.completed),
+                    "queue_length": len(state.pending) + (1 if state.current_task else 0),
                     "current": state.current_task.model_dump(mode='json') if state.current_task else None,
                 }),
             }
@@ -376,6 +378,9 @@ async def get_gallery_info(
             except (ValueError, IndexError):
                 pass
 
+    # Sort images by prompt_idx then image_idx for consistent display order
+    images.sort(key=lambda x: (x["prompt_idx"], x["image_idx"]))
+
     return GalleryDetailResponse(
         info=GalleryInfo(
             run_id=run_id,
@@ -406,7 +411,8 @@ async def get_grammar(
     except GalleryNotFoundError:
         raise HTTPException(status_code=404, detail="Gallery not found")
 
-    grammar = service.load_grammar(run_dir)
+    prefix = service.get_prefix(run_dir)
+    grammar = service.load_grammar(run_dir, prefix)
     if grammar is None:
         raise HTTPException(status_code=404, detail="Grammar not found")
 
@@ -496,7 +502,8 @@ async def regenerate_prompts(
     except MetadataNotFoundError:
         raise HTTPException(status_code=404, detail="No metadata found")
 
-    grammar = req.grammar if req and req.grammar is not None else service.load_grammar(run_dir)
+    prefix = service.get_prefix(run_dir)
+    grammar = req.grammar if req and req.grammar is not None else service.load_grammar(run_dir, prefix)
     if grammar is None:
         raise HTTPException(status_code=404, detail="Grammar not found")
 
@@ -675,6 +682,9 @@ async def get_gallery_logs(
     Returns:
         Log file contents
     """
+
+    if tail < 0:
+        raise HTTPException(status_code=400, detail="tail must be non-negative")
 
     try:
         run_dir = service.get_run_directory(run_id)

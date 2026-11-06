@@ -1,8 +1,10 @@
 """Tests for tracery_runner.py - grammar parsing and expansion."""
 
 import json
+import random
 
 import pytest
+import tracery
 
 from tracery_runner import (
     TraceryError,
@@ -42,6 +44,11 @@ class TestParseGrammar:
         with pytest.raises(TraceryError, match="origin"):
             parse_grammar("{}")
 
+    def test_parse_empty_string_raises_error(self):
+        """Test that an empty string triggers the invalid-JSON TraceryError path."""
+        with pytest.raises(TraceryError, match="Invalid JSON grammar"):
+            parse_grammar("")
+
     def test_parse_invalid_json(self):
         """Test error on invalid JSON."""
         with pytest.raises(TraceryError, match="Invalid JSON grammar"):
@@ -56,6 +63,13 @@ class TestParseGrammar:
         """Test error on truncated JSON."""
         with pytest.raises(TraceryError, match="Invalid JSON grammar"):
             parse_grammar('{"origin": ["incomplete"')
+
+    def test_parse_grammar_preserves_underlying_error_detail(self):
+        """Test that the underlying JSONDecodeError detail is preserved in TraceryError."""
+        # parse_grammar wraps the original exception: f"Invalid JSON grammar: {e}".
+        # Assert the JSONDecodeError detail ("Expecting value") appears in the message.
+        with pytest.raises(TraceryError, match="Expecting value"):
+            parse_grammar("")
 
 
 class TestGenerateOne:
@@ -118,17 +132,16 @@ class TestGenerateOne:
         result = generate_one(grammar, origin="custom")
         assert result == "custom text"
 
-    def test_generate_recursive_rule(self):
-        """Test generating with recursive rules (limited depth)."""
-        # Tracery handles recursive rules with a depth limit
+    def test_generate_finite_recursive_rule(self, monkeypatch):
+        """Test a recursive expansion with a deterministic finite choice path."""
         grammar = {
             "origin": ["#item#"],
             "item": ["leaf", "#item# and #item#"],
         }
+        choices = iter(["#item#", "#item# and #item#", "leaf", "leaf"])
+        monkeypatch.setattr(tracery.random, "choice", lambda _rules: next(choices))
         result = generate_one(grammar)
-        # Should produce some result without infinite recursion
-        assert isinstance(result, str)
-        assert len(result) > 0
+        assert result == "leaf and leaf"
 
 
 class TestRunTracery:
@@ -173,10 +186,48 @@ class TestRunTracery:
         assert len(results) == 3
         assert all(r == "alternate text" for r in results)
 
+    def test_run_tracery_zero_count(self):
+        """Test that zero count returns empty list without error."""
+        grammar_json = '{"origin": ["hello"]}'
+        results = run_tracery(grammar_json, count=0)
+
+        assert results == []
+
+    def test_run_tracery_negative_count(self):
+        """Test that negative count returns empty list (range silently handles)."""
+        grammar_json = '{"origin": ["hello"]}'
+        results = run_tracery(grammar_json, count=-1)
+
+        assert results == []
+
     def test_run_tracery_invalid_json(self):
         """Test error on invalid JSON."""
         with pytest.raises(TraceryError, match="Invalid JSON grammar"):
             run_tracery("{invalid", count=1)
+
+    def test_run_tracery_invalid_json_zero_count_returns_empty(self):
+        """Test that zero-count short-circuit skips parsing — invalid JSON returns []."""
+        # Grammar is NOT parsed when count <= 0; we return [] immediately.
+        results = run_tracery("{invalid", count=0)
+        assert results == []
+
+    def test_run_tracery_invalid_json_negative_count_returns_empty(self):
+        """Test that a negative count short-circuits before parsing invalid JSON."""
+        # The guard is `count <= 0` (not `count == 0`): a negative count with invalid
+        # JSON must return [] without raising. A `count == 0` guard would fall through
+        # to parse_grammar and raise TraceryError instead of returning [].
+        results = run_tracery("{invalid", count=-1)
+        assert results == []
+
+    def test_parse_grammar_non_dict_json(self):
+        """Imported grammars must have an origin object, not arbitrary JSON."""
+        with pytest.raises(TraceryError, match="origin"):
+            parse_grammar("[]")
+
+    def test_run_tracery_empty_rule_value(self):
+        """Reject blank caption choices before expansion."""
+        with pytest.raises(TraceryError, match="non-empty strings"):
+            run_tracery(json.dumps({"origin": [""]}), count=3)
 
     def test_run_tracery_complex_grammar(self):
         """Test with a more complex grammar."""
@@ -200,8 +251,8 @@ class TestGrammarEdgeCases:
     def test_empty_origin(self):
         """Test grammar with empty origin list raises error."""
         grammar = {"origin": []}
-        # Tracery raises IndexError when choosing from empty rule
-        with pytest.raises(IndexError, match="Cannot choose from an empty sequence"):
+        # Empty rules raise IndexError; stdlib wording differs on supported Python versions.
+        with pytest.raises(IndexError):
             generate_one(grammar)
 
     def test_missing_rule_reference(self):
@@ -268,3 +319,93 @@ class TestTraceryModifiers:
         result = generate_one(grammar)
         # Order matters: capitalize then pluralize
         assert result == "Cats"
+
+    def test_empty_string_rule(self):
+        """Test grammar with an empty string in a rule array."""
+        grammar = {
+            "origin": ["#word#", ""],
+            "word": ["hello"],
+        }
+        # Tracery picks from the list; empty string is a valid choice
+        result = generate_one(grammar)
+        assert isinstance(result, str)
+
+    def test_non_list_rule_value(self):
+        """Test grammar where a rule value is not a list."""
+        grammar = {"origin": ["#word"], "word": "hello"}
+        # Tracery normalizes string values to single-element lists internally;
+        # this should still produce valid output without raising.
+        result = generate_one(grammar)
+        assert isinstance(result, str)
+
+    def test_deep_recursion_deterministic(self, monkeypatch):
+        """Test deep recursive expansion terminates deterministically."""
+        grammar = {
+            "origin": ["#chain#"],
+            "chain": ["leaf", "#chain# + #chain#"],
+        }
+        # Provide enough choices to cover worst-case recursion depth.
+        # Each recursion adds two child expansions; 50 is generous.
+        choices = iter(["leaf"] * 50)
+        monkeypatch.setattr(tracery.random, "choice", lambda _rules: next(choices))
+        result = generate_one(grammar)
+        assert result == "leaf" or "+ leaf + leaf" in result
+
+    def test_generate_empty_grammar(self):
+        """Test generating from an empty grammar dict returns empty string."""
+        # Tracery handles empty dicts gracefully, returning empty output.
+        result = generate_one({})
+        assert isinstance(result, str)
+
+    def test_generate_non_dict_input(self):
+        """Test that passing a non-dict to generate_one raises AttributeError."""
+        with pytest.raises(AttributeError):
+            generate_one("not a dict")
+
+    def test_generate_missing_custom_origin(self):
+        """Test that referencing an undefined origin rule returns unresolved reference."""
+        grammar = {"origin": ["hello"]}
+        result = generate_one(grammar, origin="does_not_exist")
+        # Tracery leaves unresolved references as-is in the output
+        assert "does_not_exist" in result or "#does_not_exist#" in result
+
+    def test_run_tracery_with_modifiers(self):
+        """Batch grammar validation explicitly rejects unsupported modifiers."""
+        grammar_json = json.dumps({"origin": ["#mood.a#"], "mood": ["happy", "sad", "curious"]})
+        with pytest.raises(TraceryError, match="modifiers"):
+            run_tracery(grammar_json, count=50)
+
+    def test_run_tracery_seeded_calls_are_identical(self):
+        """Two calls with the same seed must return identical lists."""
+        # Seeding must happen before the flatten loop: both calls start from
+        # the same random state. A post-loop implementation (seed after the
+        # loop) would let the two calls draw from the advancing global state
+        # and this equality assertion would fail.
+        grammar_json = json.dumps({
+            "origin": ["A #mood# #animal# in the #setting#"],
+            "mood": ["happy", "sad", "curious"],
+            "animal": ["cat", "dog", "bird", "fox"],
+            "setting": ["garden", "forest", "city", "cave"],
+        })
+        first = run_tracery(grammar_json, count=10, seed=42)
+        second = run_tracery(grammar_json, count=10, seed=42)
+
+        assert len(first) == 10
+        assert first == second
+
+    def test_run_tracery_unseeded_unchanged(self):
+        """Unseeded calls keep the existing global-random behavior (no new seeding)."""
+        # With no seed, run_tracery must not call random.seed; the global
+        # random module's state must keep advancing exactly as before.
+        grammar_json = json.dumps({
+            "origin": ["#color#"],
+            "color": ["red", "green", "blue"],
+        })
+        state_before = random.getstate()
+        results = run_tracery(grammar_json, count=10)
+        state_after = random.getstate()
+
+        assert len(results) == 10
+        assert set(results) <= {"red", "green", "blue"}
+        # The flatten loop consumes randomness, advancing the PRNG state.
+        assert state_before != state_after

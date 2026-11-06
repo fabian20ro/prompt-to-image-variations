@@ -1,6 +1,9 @@
 """Tests for interactive gallery index generation."""
 
 import json
+import struct
+import zlib
+from unittest.mock import patch
 
 from gallery_index import generate_master_index
 
@@ -73,8 +76,13 @@ class TestGalleryIndexInteractive:
         assert "queue_cleared" in content
 
         # Guard against regressions to blocking browser dialogs.
-        assert "alert(" not in content
-        assert "confirm(" not in content
+        import re
+        assert re.search(r'\balert\s*\(', content) is None, (
+            "Generated index must not contain alert() calls"
+        )
+        assert re.search(r'\bconfirm\s*\(', content) is None, (
+            "Generated index must not contain confirm() calls"
+        )
 
     def test_index_with_archived_runs(self, temp_dir):
         """Test that index shows archived runs separately."""
@@ -113,3 +121,704 @@ class TestGalleryIndexInteractive:
         assert "Saved Archives" in content
         assert "archive-badge" in content
         assert "Pre-Regen" in content  # Badge for pre_regenerate
+
+    def test_index_orders_active_runs_newest_first(self, temp_dir):
+        """Active runs render newest-first in the index document.
+
+        generate_master_index sorts active_runs by timestamp descending
+        ('# Sort by timestamp (newest first)'), but every existing run test
+        asserts presence, never document order — so a regression that removed
+        or reversed the sort would pass the whole current suite.
+        """
+        older = temp_dir / "prompts" / "20240101_120000_old"
+        older.mkdir(parents=True)
+        (older / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "OLDEST RUN PROMPT",
+        }))
+        (older / "test_gallery.html").write_text("<html></html>")
+
+        newer = temp_dir / "prompts" / "20240102_090000_new"
+        newer.mkdir(parents=True)
+        (newer / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "NEWEST RUN PROMPT",
+        }))
+        (newer / "test_gallery.html").write_text("<html></html>")
+
+        content = generate_master_index(temp_dir).read_text()
+
+        assert content.index("NEWEST RUN PROMPT") < content.index("OLDEST RUN PROMPT")
+
+    def test_index_skips_directories_without_timestamp_prefix(self, temp_dir):
+        """Only directories whose names carry the timestamp prefix are indexed.
+
+        generate_master_index gates active runs on a YYYYMMDD_HHMMSS_ directory
+        name so the extracted display timestamp stays meaningful. Every existing
+        run test uses matching names, so a regression that dropped the name check
+        would silently render stray directories in the index.
+        """
+        matching = temp_dir / "prompts" / "20240101_120000_realrun"
+        matching.mkdir(parents=True)
+        (matching / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "VALID RUN PROMPT",
+        }))
+        (matching / "test_gallery.html").write_text("<html></html>")
+
+        stray = temp_dir / "prompts" / "notes_20240101_120000"
+        stray.mkdir(parents=True)
+        (stray / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "STRAY DIR PROMPT",
+        }))
+        (stray / "test_gallery.html").write_text("<html></html>")
+
+        content = generate_master_index(temp_dir).read_text()
+
+        assert "VALID RUN PROMPT" in content
+        assert "STRAY DIR PROMPT" not in content
+
+    def test_index_flat_archive_prefers_display_title(self, temp_dir):
+        """Flat archive cards should prefer display_title over raw user_prompt."""
+        saved_dir = temp_dir / "saved"
+        saved_dir.mkdir()
+
+        # Create a minimal valid PNG matching the naming pattern
+        import struct
+        png_path = saved_dir / "image_20240101_120000_0_0.png"
+        # Write a minimal 1x1 red PNG with embedded text metadata
+        png_data = bytearray()
+        # PNG signature
+        png_data.extend(b'\x89PNG\r\n\x1a\n')
+
+        # IHDR chunk (minimal)
+        ihdr_payload = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)  # width, height, bitdepth=8, colortype=2(RGB), compression, filter, interlace
+        ihdr_crc = struct.pack('>I', zlib.crc32(b'IHDR' + ihdr_payload))
+        png_data.extend(struct.pack('>I', len(ihdr_payload)))
+        png_data.extend(b'IHDR')
+        png_data.extend(ihdr_payload)
+        png_data.extend(ihdr_crc)
+
+        # IDAT chunk (minimal compressed data for 1x1 red pixel)
+        raw_data = b'\x00\xff\x00\x00'  # filter byte + RGB
+        compressed = zlib.compress(raw_data)
+        idat_crc = struct.pack('>I', zlib.crc32(b'IDAT' + compressed))
+        png_data.extend(struct.pack('>I', len(compressed)))
+        png_data.extend(b'IDAT')
+        png_data.extend(compressed)
+        png_data.extend(idat_crc)
+
+        # IEND chunk
+        iend_crc = struct.pack('>I', zlib.crc32(b'IEND'))
+        png_data.extend(struct.pack('>I', 0))
+        png_data.extend(b'IEND')
+        png_data.extend(iend_crc)
+
+        with open(png_path, 'wb') as f:
+            f.write(bytes(png_data))
+
+        # Mock get_flat_archive_metadata to return controlled data
+        with patch('gallery_index.get_flat_archive_metadata', return_value={
+            "display_title": "Custom Gallery Title",
+            "user_prompt": "raw hidden prompt text",
+            "model": "ERNIE v3.5",
+        }):
+            index_path = generate_master_index(temp_dir, interactive=True)
+            content = index_path.read_text()
+
+            # display_title should be preferred over raw user_prompt
+            assert "Custom Gallery Title" in content
+            assert "raw hidden prompt text" not in content
+
+    def test_index_handles_flat_archive_metadata_errors_gracefully(self, temp_dir):
+        """Flat archive metadata errors must not crash the index generator."""
+        saved_dir = temp_dir / "saved"
+        saved_dir.mkdir()
+
+        # Create a minimal valid PNG matching the naming pattern
+        import struct
+        png_path = saved_dir / "image_20240101_120000_0_0.png"
+        png_data = bytearray()
+        png_data.extend(b'\x89PNG\r\n\x1a\n')
+
+        ihdr_payload = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
+        ihdr_crc = struct.pack('>I', zlib.crc32(b'IHDR' + ihdr_payload))
+        png_data.extend(struct.pack('>I', len(ihdr_payload)))
+        png_data.extend(b'IHDR')
+        png_data.extend(ihdr_payload)
+        png_data.extend(ihdr_crc)
+
+        raw_data = b'\x00\xff\x00\x00'
+        compressed = zlib.compress(raw_data)
+        idat_crc = struct.pack('>I', zlib.crc32(b'IDAT' + compressed))
+        png_data.extend(struct.pack('>I', len(compressed)))
+        png_data.extend(b'IDAT')
+        png_data.extend(compressed)
+        png_data.extend(idat_crc)
+
+        iend_crc = struct.pack('>I', zlib.crc32(b'IEND'))
+        png_data.extend(struct.pack('>I', 0))
+        png_data.extend(b'IEND')
+        png_data.extend(iend_crc)
+
+        with open(png_path, 'wb') as f:
+            f.write(bytes(png_data))
+
+        # Mock get_flat_archive_metadata to raise an exception (simulating corrupted metadata)
+        with patch('gallery_index.get_flat_archive_metadata', side_effect=RuntimeError("corrupted")):
+            index_path = generate_master_index(temp_dir, interactive=True)
+            content = index_path.read_text()
+
+            # The index should still be generated with sensible defaults
+            assert index_path.exists()
+            assert "Archived images" in content  # default user_prompt fallback
+            assert ">N/A<" in content or "N/A" in content  # default model fallback appears rendered
+
+    def test_index_resolves_nested_image_generation_model_fallback(self, temp_dir):
+        """_extract_run_info should fall back to image_generation.model when top-level model is absent."""
+        active_run = temp_dir / "prompts" / "20240101_120000_xyz789"
+        active_run.mkdir(parents=True)
+        (active_run / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "fallback test prompt",
+            "image_generation": {"model": "Flux-dev-v2"},
+        }))
+        (active_run / "test_gallery.html").write_text("<html></html>")
+
+        index_path = generate_master_index(temp_dir, interactive=True)
+        content = index_path.read_text()
+
+        assert "Flux-dev-v2" in content
+
+    def test_build_generation_form_returns_complete_markup(self):
+        from gallery_index import _build_generation_form
+        html = _build_generation_form()
+        assert "<form id=\"generate-form\">" in html
+        assert 'name="prompt"' in html
+        assert 'name="prefix"' in html
+        assert 'id="count"' in html
+        assert 'id="temperature"' in html
+
+    def test_build_queue_status_bar_contains_queue_element(self):
+        from gallery_index import _build_queue_status_bar
+        html = _build_queue_status_bar()
+        assert "queue-status" in html
+        assert "<div" in html and "</div>" in html
+
+    def test_build_log_panel_returns_collapsible_markup(self):
+        from gallery_index import _build_log_panel
+        html = _build_log_panel()
+        # Requires both the specific element ID and collapsible structure — catches
+        # regressions where the component is replaced or its ID changes.
+        assert 'id="log-panel"' in html
+        assert "<details" in html
+
+    def test_build_notifications_contains_toast_and_confirm(self):
+        from gallery_index import _build_notifications
+        html = _build_notifications()
+        assert "toast-region" in html or "showToast" in html
+        assert "confirm-modal" in html or "confirmAction" in html
+
+    def test_extract_run_info_returns_none_when_no_metadata(self, temp_dir):
+        """_extract_run_info should return None when no metadata file exists."""
+        from gallery_index import _extract_run_info
+        empty_run = temp_dir / "prompts" / "20240101_120000_empty"
+        empty_run.mkdir(parents=True)
+
+        result = _extract_run_info(empty_run, is_archive=False)
+        assert result is None
+
+    def test_extract_run_info_returns_none_for_corrupt_metadata(self, temp_dir):
+        """_extract_run_info should return None for corrupt JSON metadata."""
+        from gallery_index import _extract_run_info
+        bad_run = temp_dir / "prompts" / "20240101_120000_bad"
+        bad_run.mkdir(parents=True)
+        (bad_run / "test.metaprompt.json").write_text("{not valid json")
+
+        result = _extract_run_info(bad_run, is_archive=False)
+        assert result is None
+
+    def test_extract_run_info_returns_none_when_no_gallery(self, temp_dir):
+        """_extract_run_info should return None if gallery file missing."""
+        from gallery_index import _extract_run_info
+        no_gallery = temp_dir / "prompts" / "20240101_120000_nogal"
+        no_gallery.mkdir(parents=True)
+        (no_gallery / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+        }))
+
+        result = _extract_run_info(no_gallery, is_archive=False)
+        assert result is None
+
+    def test_build_card_html_truncates_long_prompt(self):
+        """_build_card_html should truncate prompts longer than 100 chars."""
+        from gallery_index import _build_card_html
+        long_prompt = "x" * 150
+        run = {
+            "user_prompt": long_prompt,
+            "display_time": "2024-01-01 12:00",
+            "image_count": 5,
+            "prompt_count": 3,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=False)
+        assert "...".encode() in html.encode("utf-8") or '...' in html
+        # The full long prompt should NOT appear as visible text (only in title attribute)
+        # Check that truncated prompt appears: first 100 chars + "..." = 103 chars
+        expected_visible = f'{"x" * 100}...'
+        assert expected_visible.encode() in html.encode("utf-8") or expected_visible in html
+
+    def test_build_card_html_escapes_html_in_user_prompt(self):
+        """Card must HTML-escape user_prompt; raw < and & must not reach the page.
+
+        Every existing card test uses a prompt free of HTML-special characters,
+        so a regression that removed the html.escape() call (injection of raw
+        markup into the browser-facing index) would still pass them all. This
+        pins the escaped form in the rendered card and asserts the raw form is absent.
+        """
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "a < b & c",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": "prompts/20240101_120000_xxx/image.png",
+        }
+        html = _build_card_html(run, interactive=False)
+
+        assert "a &lt; b &amp; c" in html
+        assert "a < b & c" not in html
+
+    def test_build_flat_archive_card_no_thumbnail_fallback(self):
+        """_build_flat_archive_card_html should show no-thumbnail when no first_image."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "simple prompt",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "model": "test-model",
+            "first_image": None,
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert "No images" in html
+
+    def test_build_index_html_empty_state_shows_message(self):
+        """_build_index_html should show empty-state message when no active runs."""
+        from gallery_index import _build_index_html
+        html = _build_index_html(active_runs=[])
+        assert "No galleries found" in html
+
+    def test_format_run_timestamp_produces_expected_output(self):
+        """format_run_timestamp should produce a readable timestamp string."""
+        from utils import format_run_timestamp
+        result = format_run_timestamp("20240101_120000")
+        assert isinstance(result, str)
+        # Should not be the raw input unchanged
+        assert result != "20240101_120000"
+
+    def test_build_flat_archive_card_shows_saved_badge(self):
+        """_build_flat_archive_card_html should render 'Saved' for manual_archive backup reason."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "manual save",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "model": "test-model",
+            "first_image": None,
+            "backup_reason": "manual_archive",
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert '<span class="archive-badge">Saved</span>' in html
+
+    def test_build_flat_archive_card_shows_pre_enhance_badge(self):
+        """_build_flat_archive_card_html should render 'Pre-Enhance' for pre_enhance backup reason."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "pre enhance",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "model": "test-model",
+            "first_image": None,
+            "backup_reason": "pre_enhance",
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert '<span class="archive-badge">Pre-Enhance</span>' in html
+
+    def test_build_flat_archive_card_unknown_backup_reason(self):
+        """_build_flat_archive_card_html should render 'Backup' for unrecognized backup reason."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "unknown",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "model": "test-model",
+            "first_image": None,
+            "backup_reason": "some_obscure_reason",
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert '<span class="archive-badge">Backup</span>' in html
+
+    def test_extract_run_info_falls_back_to_nested_model(self, temp_dir):
+        """_extract_run_info should fall back to image_generation.model when top-level model is absent."""
+        from gallery_index import _extract_run_info
+        active_run = temp_dir / "prompts" / "20240101_120000_xyz789"
+        active_run.mkdir(parents=True)
+        (active_run / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "fallback test prompt",
+            "image_generation": {"model": "Flux-dev-v2"},
+        }))
+        (active_run / "test_gallery.html").write_text("<html></html>")
+
+        result = _extract_run_info(active_run, is_archive=False)
+        assert result is not None
+        assert result["model"] == "Flux-dev-v2"
+
+    def test_extract_run_info_unknown_prompt_fallback(self, temp_dir):
+        """_extract_run_info should return 'Unknown prompt' when neither display_title nor user_prompt is set."""
+        from gallery_index import _extract_run_info
+        active_run = temp_dir / "prompts" / "20240101_120000_unknown"
+        active_run.mkdir(parents=True)
+        (active_run / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+        }))
+        (active_run / "test_gallery.html").write_text("<html></html>")
+
+        result = _extract_run_info(active_run, is_archive=False)
+        assert result is not None
+        assert result["user_prompt"] == "Unknown prompt"
+        assert result["model"] == "N/A"
+
+    def test_build_index_html_empty_flat_archives_section(self):
+        """_build_index_html should not render flat-archive section when there are none."""
+        from gallery_index import _build_index_html
+        html = _build_index_html(active_runs=[], archived_runs=[], flat_archives=[])
+        assert "Archived Images" not in html
+
+    def test_extract_run_info_timestamp_from_archive_dirname(self, temp_dir):
+        """_extract_run_info should extract only the first two underscore segments as timestamp."""
+        from gallery_index import _extract_run_info
+        # Archive-style directory has 4+ underscore-separated components.
+        archive_run = temp_dir / "saved" / "20240101_100000_def456_20240101_130000"
+        archive_run.mkdir(parents=True)
+        (archive_run / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+        }))
+        (archive_run / "test_gallery.html").write_text("<html></html>")
+
+        result = _extract_run_info(archive_run, is_archive=True)
+        assert result is not None
+        # The timestamp must be only the first two segments — a change to the split
+        # logic should not silently start consuming later path components.
+        assert result["timestamp"] == "20240101_100000"
+
+    def test_build_card_html_singular_plural_for_images(self):
+        """Active card uses 'image' for 1, 'images' otherwise."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 1,
+            "prompt_count": 3,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=False)
+        assert "1 image" in html and "| 3 prompts" in html
+
+    def test_build_card_html_singular_plural_for_prompts(self):
+        """Active card uses 'prompt' for 1, 'prompts' otherwise."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 5,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=False)
+        assert "5 images" in html and "| 1 prompt" in html
+
+    def test_build_card_html_interactive_active_uses_gallery_route(self):
+        """Interactive active-card thumbnail and href must use /gallery/ route."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": "image_20240101_120000_0.png",
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=True)
+
+        assert "/gallery/20240101_120000_xxx/image_20240101_120000_0.png" in html
+        assert 'href="/gallery/20240101_120000_xxx"' in html
+
+    def test_build_card_html_interactive_archive_uses_archive_route(self):
+        """Interactive archive card must use /archive/ route and omit the delete button."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_100000_arch",
+            "gallery_path": "saved/20240101_100000_arch/test_gallery.html",
+            "thumbnail_file": "image_20240101_100000_0.png",
+            "thumbnail": None,
+            "backup_reason": "manual_archive",
+        }
+        html = _build_card_html(run, interactive=True, is_archive=True)
+        assert 'href="/archive/20240101_100000_arch"' in html
+        assert 'src="/archive/20240101_100000_arch/image_20240101_100000_0.png"' in html
+        assert "/gallery/" not in html
+        assert "btn-delete" not in html
+
+    def test_build_card_html_interactive_active_shows_delete_button(self):
+        """Interactive active card must render the delete button wired to deleteGallery.
+
+        The delete affordance is deliberately active-only (the archive test above
+        asserts its absence); no existing test covers the active branch, so a
+        regression that drops or re-wires the button would still pass.
+        """
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": "image_20240101_120000_0.png",
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=True, is_archive=False)
+        assert 'class="btn-delete"' in html
+        assert 'deleteGallery("20240101_120000_xxx")' in html
+
+    def test_flat_archive_prompt_counting_reflects_unique_indices(self, temp_dir):
+        """Flat archive card should reflect distinct prompt indices from filenames.
+
+        _extract_flat_archive_infos counts unique prompt indices extracted via regex
+        from image filenames. This observable count drives the "N prompts" text in
+        the rendered card — a user-visible detail that must track correctly when
+        filename patterns change.
+        """
+        saved_dir = temp_dir / "saved"
+        saved_dir.mkdir()
+
+        # Create PNGs with 3 distinct prompt indices (5 images total)
+        png_path_0_0 = saved_dir / "image_20240101_120000_0_0.png"
+        png_path_0_1 = saved_dir / "image_20240101_120000_0_1.png"
+        png_path_1_0 = saved_dir / "image_20240101_120000_1_0.png"
+        png_path_2_0 = saved_dir / "image_20240101_120000_2_0.png"
+        for p in (png_path_0_0, png_path_0_1, png_path_1_0, png_path_2_0):
+            import struct; import zlib
+            data = bytearray(b'\x89PNG\r\n\x1a\n')
+            payload = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
+            crc = struct.pack('>I', zlib.crc32(b'IHDR' + payload))
+            data.extend(struct.pack('>I', len(payload))); data.extend(b'IHDR'); data.extend(payload); data.extend(crc)
+            raw = b'\x00\xff\x00\x00'; comp = zlib.compress(raw)
+            icrc = struct.pack('>I', zlib.crc32(b'IDAT' + comp))
+            data.extend(struct.pack('>I', len(comp))); data.extend(b'IDAT'); data.extend(comp); data.extend(icrc)
+            ecrc = struct.pack('>I', zlib.crc32(b'IEND'))
+            data.extend(struct.pack('>I', 0)); data.extend(b'IEND'); data.extend(ecrc)
+            p.write_bytes(bytes(data))
+
+        with patch('gallery_index.get_flat_archive_metadata', return_value={
+            "display_title": "Prompt count test",
+            "user_prompt": "hidden prompt",
+            "model": "ERNIE v3.5",
+        }):
+            index_path = generate_master_index(temp_dir, interactive=True)
+            content = index_path.read_text()
+
+        # 4 images across 3 distinct prompts — flat archive cards render image count only,
+        # so we assert on the actual visible text: "4 images" plural form. The display_title
+        # fallback must win over the raw user_prompt in card content.
+        assert "4 images" in content
+        assert "hidden prompt" not in content
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": "prompts/20240101_120000_xxx/image.png",
+        }
+        html = _build_card_html(run, interactive=False)
+
+        assert 'src="prompts/20240101_120000_xxx/image.png"' in html
+        assert 'href="prompts/20240101_120000_xxx/test_gallery.html"' in html
+
+    def test_build_flat_archive_card_singular_plural(self):
+        """Flat archive card uses 'image' for 1, 'images' otherwise."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 1,
+            "model": "test-model",
+            "first_image": None,
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert "1 image" in html
+
+    def test_build_flat_archive_card_plural(self):
+        """Flat archive card uses 'images' for counts other than 1."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 5,
+            "model": "test-model",
+            "first_image": None,
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert "5 images" in html and "images" in html
+
+    def test_build_flat_archive_card_zero_images(self):
+        """Flat archive card renders '0 images' (not '1 image')."""
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 0,
+            "model": "test-model",
+            "first_image": None,
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert "0 images" in html
+
+    def test_build_active_archive_card_unknown_backup_reason(self):
+        """Active archive card renders 'Backup' label for unrecognized backup reason."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "saved/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+            "backup_reason": "some_obscure_reason",
+        }
+        html = _build_card_html(run, interactive=False, is_archive=True)
+        assert '<span class="archive-badge">Backup</span>' in html
+
+    def test_build_flat_archive_card_interactive_uses_saved_route(self):
+        """Flat archive card must serve the thumbnail via /saved/ in interactive mode.
+
+        Existing flat-archive card tests all pass first_image=None (the
+        'No images' fallback). The interactive branch that renders
+        <img src="/saved/<name>"> is implemented but untested — a regression
+        to the relative 'saved/<name>' form in interactive mode would slip
+        through undetected.
+        """
+        from pathlib import Path
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "model": "test-model",
+            "first_image": Path("image_20240101_120000_0_0.png"),
+        }
+        html = _build_flat_archive_card_html(archive, interactive=True)
+        assert 'src="/saved/image_20240101_120000_0_0.png"' in html
+
+
+class TestGrammarRevisionCount:
+    """Tests for grammar revision count on master index entries."""
+
+    def test_index_shows_grammar_revision_count(self, temp_dir):
+        """Run with a 3-entry grammar history shows '3 grammar revisions'."""
+        run_dir = temp_dir / "prompts" / "20240101_120000_abc123"
+        run_dir.mkdir(parents=True)
+        (run_dir / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "prompt",
+        }))
+        (run_dir / "test_gallery.html").write_text("<html></html>")
+        history = [{"id": "1", "action": "initial", "grammar": "v1"},
+                   {"id": "2", "action": "update", "grammar": "v2"},
+                   {"id": "3", "action": "update", "grammar": "v3"}]
+        (run_dir / "test_grammar_history.json").write_text(json.dumps(history))
+
+        index_path = generate_master_index(temp_dir)
+        content = index_path.read_text()
+
+        assert "3 grammar revisions" in content
+
+    def test_index_defaults_to_single_grammar_revision(self, temp_dir):
+        """Run without a grammar history file shows '1 grammar revision'."""
+        run_dir = temp_dir / "prompts" / "20240101_120000_abc123"
+        run_dir.mkdir(parents=True)
+        (run_dir / "test.metaprompt.json").write_text(json.dumps({
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": "prompt",
+        }))
+        (run_dir / "test_gallery.html").write_text("<html></html>")
+
+        index_path = generate_master_index(temp_dir)
+        content = index_path.read_text()
+
+        assert "1 grammar revision" in content
+
+    def test_build_card_grammar_revision_fallback(self):
+        """Card without grammar_revisions key falls back to singular '1 grammar revision'."""
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "20240101_120000_xxx",
+            "gallery_path": "prompts/20240101_120000_xxx/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": "prompts/20240101_120000_xxx/image.png",
+        }
+        html = _build_card_html(run, interactive=False)
+
+        assert "1 grammar revision" in html
+        assert 'src="saved/' not in html

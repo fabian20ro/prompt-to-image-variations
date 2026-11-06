@@ -1,4 +1,4 @@
-"""Shared utility functions for the image-prompt-expander application."""
+"""Shared utility functions for the prompt-to-image-variations application."""
 
 import json
 import logging
@@ -40,7 +40,7 @@ def format_run_timestamp(timestamp: str) -> str:
     Returns:
         Formatted timestamp or original if format doesn't match
     """
-    if len(timestamp) == 15 and timestamp[8] == "_":
+    if len(timestamp) == 15 and timestamp[8] == "_" and re.fullmatch(r"\d{4}\d{2}\d{2}_\d{2}\d{2}\d{2}", timestamp):
         return (
             f"{timestamp[0:4]}-{timestamp[4:6]}-{timestamp[6:8]} "
             f"{timestamp[9:11]}:{timestamp[11:13]}:{timestamp[13:15]}"
@@ -117,6 +117,27 @@ def count_images_in_run(run_dir: Path, prefix: str | None = None) -> int:
     return len(list(run_dir.glob(f"{prefix}_*_*.png")))
 
 
+def prompt_files_in_run(run_dir: Path, prefix: str | None = None) -> list[Path]:
+    """Present prompt artifacts, not intended metadata count or raw-response sidecars.
+
+    Known producer prefixes use indexed filenames. Metadata-free legacy runs
+    retain opaque text filenames; listing never reads prompt contents.
+    """
+    if prefix is None and find_metadata_file(run_dir) is not None:
+        from metadata_manager import MetadataManager, MetadataError
+        try:
+            metadata = MetadataManager.load_raw(run_dir)
+            candidate = metadata.get("prefix") if isinstance(metadata, dict) else None
+            prefix = candidate if isinstance(candidate, str) else None
+        except MetadataError:
+            pass  # Incomplete metadata must not break read-only inspection.
+    pattern = re.compile(rf"^{re.escape(prefix)}_\d+\.txt$") if prefix else None
+    return sorted(path for path in run_dir.glob("*")
+                  if path.is_file() and path.suffix.lower() == ".txt"
+                  and (bool(pattern.fullmatch(path.name)) if pattern else
+                       not path.name.lower().endswith("_raw_response.txt")))
+
+
 def get_prompts_from_run(run_dir: Path, prefix: str | None = None) -> list[str]:
     """Load all prompt texts from a run directory.
 
@@ -130,13 +151,7 @@ def get_prompts_from_run(run_dir: Path, prefix: str | None = None) -> list[str]:
     if prefix is None:
         prefix = get_prefix_from_metadata(run_dir)
 
-    prompt_files = sorted(run_dir.glob(f"{prefix}_*.txt"))
-    # Filter to only prompt files (prefix_N.txt), not metadata or other files
-    import re
-    pattern = re.compile(rf"^{re.escape(prefix)}_\d+\.txt$")
-    prompt_files = [f for f in prompt_files if pattern.match(f.name)]
-
-    return [f.read_text() for f in prompt_files]
+    return [f.read_text() for f in prompt_files_in_run(run_dir, prefix)]
 
 
 def _get_prompt_text(run_dir: Path, prefix: str, prompt_idx: int) -> str:
@@ -154,6 +169,40 @@ def _get_prompt_text(run_dir: Path, prefix: str, prompt_idx: int) -> str:
     if prompt_file.exists():
         return prompt_file.read_text()
     return ""
+
+
+PNG_TEXT_MAX_BYTES = 8000
+
+
+def _truncate_for_png(value: str, key: str) -> str:
+    """Truncate a text value to PNG tEXt chunk limits.
+
+    Pillow's add_text compresses via zlib; very large uncompressed values can
+    cause OOM or compression failures. This caps values at ~8KB with a warning.
+
+    Args:
+        value: Text value to embed in a PNG chunk
+        key: Field name (used in log message)
+
+    Returns:
+        The (possibly truncated) text value safe for embedding.
+    """
+    encoded = value.encode("utf-8")
+    if len(encoded) > PNG_TEXT_MAX_BYTES:
+        logger.warning(
+            f"Truncating '{key}' from {len(encoded)} to {PNG_TEXT_MAX_BYTES} bytes "
+            f"for PNG text chunk embedding"
+        )
+        # Trim trailing bytes until UTF-8 decode succeeds without error,
+        # preserving more content when multi-byte chars are at the boundary.
+        for cut in range(PNG_TEXT_MAX_BYTES + 1):
+            try:
+                return encoded[:PNG_TEXT_MAX_BYTES - cut].decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        # All slices failed — last resort, same as before but deterministic.
+        return encoded[:PNG_TEXT_MAX_BYTES].decode("utf-8", errors="ignore")
+    return value
 
 
 def _copy_with_exif(
@@ -175,9 +224,11 @@ def _copy_with_exif(
     img = Image.open(src)
     png_info = PngInfo()
 
-    # Embed key metadata in PNG text chunks
-    png_info.add_text("prompt", prompt_text)
-    png_info.add_text("user_prompt", metadata.get("user_prompt", ""))
+    # Embed key metadata in PNG text chunks (truncated if too large)
+    safe_prompt = _truncate_for_png(prompt_text, "prompt")
+    safe_user_prompt = _truncate_for_png(metadata.get("user_prompt", ""), "user_prompt")
+    png_info.add_text("prompt", safe_prompt)
+    png_info.add_text("user_prompt", safe_user_prompt)
     png_info.add_text("model", metadata.get("model", ""))
     png_info.add_text("created_at", metadata.get("created_at", ""))
     png_info.add_text("backup_reason", reason)

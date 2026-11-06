@@ -1,6 +1,7 @@
 """Tests for src/grammar_history — persisted grammar revision history helpers."""
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ if str(src_dir) not in sys_path:
 from grammar_history import (
     _history_path,
     append_grammar_revision,
+    get_recent_revisions,
     load_grammar_history,
     save_grammar_history,
 )
@@ -48,7 +50,16 @@ class TestLoadGrammarHistory:
         result = load_grammar_history(run_dir, "test", current_grammar=grammar_text)
         assert len(result) == 1
         assert result[0]["id"] == "initial"
+        assert result[0]["action"] == "initial"
         assert result[0]["grammar"] == grammar_text
+        # The synthetic fallback entry must carry a parseable ISO-8601 timestamp:
+        # the gallery UI renders new Date(entry.created_at) (src/gallery.py) and
+        # the GET /api/gallery/{run_id}/grammar/history endpoint returns entries
+        # verbatim (src/server/routes.py), so a missing or malformed created_at
+        # would surface as "Invalid Date" to the user.
+        created_at = result[0]["created_at"]
+        assert isinstance(created_at, str)
+        datetime.fromisoformat(created_at)
 
     def test_falls_back_to_current_grammar_on_corrupted_json(self, run_dir):
         path = _history_path(run_dir, "test")
@@ -78,6 +89,30 @@ class TestSaveGrammarHistory:
         loaded = json.loads(result_path.read_text())
         assert len(loaded) == 1
         assert loaded[0]["id"] == "x"
+        # Full round-trip fidelity: every field must survive write + read.
+        for key in ("id", "created_at", "action", "grammar"):
+            assert loaded[0][key] == history[0][key], f"{key} drifted through save/load cycle"
+
+    def test_round_trip_via_load_grammar_history(self, run_dir):
+        """save → load must round-trip a multi-entry history identically.
+
+        Verifies the production contract: after writing history to disk and
+        re-loading via load_grammar_history (the canonical caller), every entry's
+        fields match their originals — not just count or one field. This catches
+        serialization surprises (type coercion, float precision, key ordering) that
+        single-field assertions miss.
+        """
+        history = [
+            {"id": "r1", "created_at": "2024-06-01T12:30:00", "action": "initial", "grammar": '{"origin":["a"]}'},
+            {"id": "r2", "created_at": "2024-06-01T13:00:00", "action": "update", "grammar": '{"origin":["b"]}'},
+        ]
+
+        save_grammar_history(run_dir, "roundtrip_test", history)
+        loaded = load_grammar_history(run_dir, "roundtrip_test")
+
+        assert len(loaded) == len(history)
+        for orig, got in zip(history, loaded):
+            assert orig == got, f"Entry {got['id']} differs from original after save→load cycle"
 
 
 class TestAppendGrammarRevision:
@@ -109,6 +144,50 @@ class TestAppendGrammarRevision:
         history = append_grammar_revision(run_dir, "test", grammar="rule_a  ", action="initial")
         assert len(history) == 1
 
+    def test_appends_when_whitespace_differs_and_action_changes(self, run_dir):
+        """Dedup skips only when BOTH grammar (whitespace-normalized) AND action match.
+
+        Verifies the contract boundary: whitespace-asymmetric grammars still append if
+        the action differs from the last revision's action — confirming that dedup is
+        an exact-match gate on both fields, not a single-field short-circuit.
+        """
+        append_grammar_revision(run_dir, "test", grammar="rule_a", action="initial")
+        history = append_grammar_revision(
+            run_dir, "test", grammar="  rule_a  ", action="update"
+        )
+        assert len(history) == 2
+        assert history[1]["action"] == "update"
+
+    def test_appends_when_duplicate_exists_before_last(self, run_dir):
+        """Dedup only checks the last entry — earlier duplicates still append.
+
+        The dedup gate compares against `history[-1]` exclusively: if a grammar+action
+        pair appears elsewhere in history (not as the last entry), it is still appended.
+        This test characterizes that boundary so future refactors do not accidentally
+        change dedup to "global uniqueness" or break rotation semantics.
+        """
+        append_grammar_revision(run_dir, "test", grammar="rule_a", action="initial")
+        append_grammar_revision(run_dir, "test", grammar="rule_b", action="update")
+        history = append_grammar_revision(run_dir, "test", grammar="rule_a", action="initial")
+        assert len(history) == 3
+        assert history[2]["action"] == "initial"
+
+    def test_empty_grammar_no_side_effects_when_no_prior_state(self, run_dir):
+        """Empty/whitespace-only grammar must be a true no-op — no history file created.
+
+        The early return on `not grammar.strip()` runs before any file I/O; this test
+        characterizes that boundary so future refactors do not accidentally write files
+        or append empty entries when the input is blank.
+        """
+        path = _history_path(run_dir, "empty_test")
+        assert not path.exists()
+
+        history = append_grammar_revision(
+            run_dir, "empty_test", grammar="   ", action="initial"
+        )
+        assert history == []
+        assert not path.exists()
+
     def test_creates_history_file_on_first_append(self, run_dir):
         append_grammar_revision(run_dir, "test", grammar="rule_a", action="initial")
         path = _history_path(run_dir, "test")
@@ -116,15 +195,683 @@ class TestAppendGrammarRevision:
 
 
 class TestLoadGrammarHistoryEdgeCases:
+    def test_valid_empty_list_returns_as_is_without_fallback(self, run_dir):
+        """Valid empty-list JSON must return the list directly — no fallback to current grammar.
+
+        Characterizes the `isinstance(data, list)` gate at line 18-19: when on-disk
+        data is a valid empty list (not corrupted, not dict), load_grammar_history
+        returns it as-is without consulting the current grammar file or creating an
+        "initial" entry. This locks in the boundary between "valid but empty" and
+        "corrupt/fallback-needed."
+        """
+        path = _history_path(run_dir, "empty_list_test")
+        path.write_text(json.dumps([]))
+
+        result = load_grammar_history(run_dir, "empty_list_test")
+        assert result == []
+        # Verify no grammar file was consulted or created on disk
+        assert not (run_dir / "empty_list_test_grammar.json").exists()
+
+    def test_valid_non_empty_list_wins_over_current_grammar(self, run_dir):
+        """A valid non-empty on-disk list must be returned as-is even when current_grammar is passed.
+
+        Precedence boundary: the on-disk history is the source of truth, and the
+        current_grammar fallback is consulted only when no usable list exists. The
+        sibling ``test_valid_empty_list_returns_as_is_without_fallback`` pins this for
+        the empty-list case (and passes no current_grammar). This pins the non-empty
+        case WITH an explicit current_grammar: a refactor that synthesizes a single
+        'current' revision whenever current_grammar is truthy — ignoring the stored
+        list — would return one fabricated entry and fail the assertions below.
+        """
+        path = _history_path(run_dir, "precedence_test")
+        on_disk = [
+            {"id": "r0", "created_at": "2024-01-01T00:00:00", "action": "initial", "grammar": "stored_0"},
+            {"id": "r1", "created_at": "2024-01-02T00:00:00", "action": "update", "grammar": "stored_1"},
+        ]
+        path.write_text(json.dumps(on_disk))
+
+        result = load_grammar_history(
+            run_dir, "precedence_test", current_grammar='{"origin": ["caller"]}'
+        )
+
+        # Disk list returned verbatim; the caller's current_grammar is never consulted.
+        assert len(result) == 2
+        assert result[0]["id"] == "r0"
+        assert result[1]["id"] == "r1"
+        assert result[0]["grammar"] == "stored_0"
+        assert result[1]["grammar"] == "stored_1"
+
     def test_returns_empty_when_json_is_dict_instead_of_list(self, run_dir):
         path = _history_path(run_dir, "dict_instead_of_list")
         path.write_text(json.dumps({"not": "a list"}))
-        
+
         result = load_grammar_history(run_dir, "dict_instead_of_list")
         assert result == []
+
+    def test_returns_empty_on_corrupted_json_with_no_fallback(self, run_dir):
+        """Corrupted JSON file with no current_grammar fallback returns [].
+
+        Verifies the silent-swalow boundary: load_grammar_history must not raise or
+        return partial data when history is corrupt and no current grammar is supplied.
+        Callers rely on this contract to detect "no usable history."
+        """
+        path = _history_path(run_dir, "corrupted_test")
+        path.write_text("<<<garbage json>>>")
+
+        result = load_grammar_history(run_dir, "corrupted_test")
+        assert result == []
+        assert not (run_dir / "corrupted_test_grammar.json").exists()
+
+    def test_corrupted_json_falls_back_to_disk_grammar_file(self, run_dir):
+        """Corrupted history file + grammar file on disk must recover the current grammar.
+
+        The sibling ``test_returns_empty_on_corrupted_json_with_no_fallback`` covers the
+        corrupted-file case with NO fallback source. The disk-grammar read at line 23-25
+        of load_grammar_history is only reached when current_grammar is None, and every
+        other corrupted-JSON test in this module either passes current_grammar explicitly
+        or has no grammar file on disk — so the exact combination "history file exists
+        but is unparseable, disk grammar file present" is unexercised.
+
+        This is the session-recovery path: append_grammar_revision calls
+        load_grammar_history with current_grammar=None, so a regression that
+        consults the disk grammar file only when the history file is absent (or that
+        returns [] after a parse failure when a file exists) would lose the user's
+        current grammar — the next append would then rewrite history as a single
+        fabricated entry, silently discarding every prior revision.
+        """
+        path = _history_path(run_dir, "corrupt_disk_test")
+        path.write_text("<<<corrupted json{{{")
+        grammar_text = '{"origin": ["disk_fallback"]}'
+        (run_dir / "corrupt_disk_test_grammar.json").write_text(grammar_text)
+
+        result = load_grammar_history(run_dir, "corrupt_disk_test")
+
+        assert len(result) == 1
+        assert result[0]["id"] == "initial"
+        assert result[0]["action"] == "initial"
+        assert result[0]["grammar"] == grammar_text
 
     def test_skips_when_grammar_is_empty_or_whitespace(self, run_dir):
         append_grammar_revision(run_dir, "test", grammar="initial", action="initial")
         history = append_grammar_revision(run_dir, "test", grammar="   ", action="initial")
         assert len(history) == 1
         assert history[0]["grammar"] == "initial"
+
+
+class TestAppendGrammarRotation:
+    def test_rotation_trims_to_max_revisions(self, run_dir):
+        for i in range(5):
+            append_grammar_revision(run_dir, "test", grammar=f"rule_{i}", action="update")
+        history = append_grammar_revision(run_dir, "test", grammar="final", action="update", max_revisions=3)
+        assert len(history) == 3
+        assert history[0]["grammar"] == "rule_3"
+        assert history[-1]["grammar"] == "final"
+
+    def test_no_rotation_when_under_limit(self, run_dir):
+        append_grammar_revision(run_dir, "test", grammar="a", action="initial")
+        append_grammar_revision(run_dir, "test", grammar="b", action="update")
+        history = append_grammar_revision(run_dir, "test", grammar="c", action="update", max_revisions=10)
+        assert len(history) == 3
+
+    def test_no_rotation_on_dedup_match(self, run_dir):
+        """Dedup must not trigger rotation — unchanged revisions are skipped."""
+        append_grammar_revision(run_dir, "test", grammar="a", action="initial")
+        history = append_grammar_revision(
+            run_dir, "test", grammar="a", action="initial", max_revisions=1
+        )
+        assert len(history) == 1
+
+    def test_empty_grammar_after_prior_state_skips_disk_write(self, run_dir):
+        """Empty/whitespace-only grammar must be a no-op — no history file rewritten.
+
+        Characterizes the early-return path in append_grammar_revision: when called
+        after prior state exists and the new grammar is empty/blank, it returns the
+        existing history unchanged without writing the file. The prior file is
+        pre-seeded in compact JSON (byte-for-byte different from
+        save_grammar_history's indent=2 form), so a regression that re-saves on the
+        empty-grammar path would rewrite the file to normalized form — the
+        byte-identity check below fails deterministically, with no dependence on
+        filesystem mtime granularity or wall-clock sleeps.
+        """
+        prior_history = [
+            {
+                "id": "seeded",
+                "created_at": "2024-01-01T00:00:00",
+                "action": "initial",
+                "grammar": "first_rule",
+            },
+        ]
+        edge_path = _history_path(run_dir, "edge_test")
+        # Compact separators differ byte-for-byte from indent=2 normalized output
+        edge_path.write_text(
+            json.dumps(prior_history, separators=(",", ":")), encoding="utf-8"
+        )
+        original_bytes = edge_path.read_bytes()
+
+        # Empty grammar after prior state — must return existing history, not rewrite disk
+        history = append_grammar_revision(run_dir, "edge_test", grammar="   ", action="initial")
+
+        assert history == prior_history  # full content equality, not just length/grammar
+        # File must remain byte-identical (no rewrite on the empty-grammar path)
+        assert edge_path.read_bytes() == original_bytes
+
+    def test_zero_max_revisions_disables_rotation(self, run_dir):
+        for i in range(5):
+            append_grammar_revision(run_dir, "test", grammar=f"rule_{i}", action="update")
+        history = append_grammar_revision(run_dir, "test", grammar="final", action="update", max_revisions=0)
+        assert len(history) == 6
+
+    def test_negative_max_revisions_causes_unexpected_trimming(self, run_dir):
+        """Negative max_revisions is truthy in Python → slicing becomes `history[1:]`.
+
+        The rotation guard at line 80 uses bare `if max_revisions`, which treats any
+        non-zero value as true. A negative value passes the guard and then slices
+        the history starting from index 1 (dropping the first entry). This test
+        characterizes that current behavior so callers know to validate their input.
+        """
+        append_grammar_revision(run_dir, "test", grammar="rule_a", action="initial")
+        append_grammar_revision(run_dir, "test", grammar="rule_b", action="update")
+        history = append_grammar_revision(
+            run_dir, "test", grammar="rule_c", action="update", max_revisions=-1
+        )
+        # history[-(-1):] == history[1:] — first entry is dropped
+        assert len(history) == 2
+        assert history[0]["grammar"] == "rule_b"
+
+    def test_empty_valid_json_on_disk_appends_first_revision(self, run_dir):
+        """Valid empty JSON array on disk → load returns [] → last=None → append proceeds.
+
+        Characterizes that an existing file containing `[]` is treated as "no usable
+        history": the dedup gate sees `last = None`, so the first real revision still
+        gets appended rather than being dropped by a missing-file fallback path.
+        """
+        import json
+        from grammar_history import _history_path
+
+        history_path = _history_path(run_dir, "empty_array")
+        history_path.write_text("[]")  # valid empty list on disk
+
+        history = append_grammar_revision(
+            run_dir, "empty_array", grammar="rule_first", action="initial"
+        )
+        assert len(history) == 1
+        assert history[0]["id"] != "initial"  # not the synthetic initial id
+        assert history[0]["action"] == "initial"
+        assert history[0]["grammar"] == "rule_first"
+
+    def test_dedup_uses_stripped_comparison_for_grammar(self, run_dir):
+        """Dedup compares grammar via .strip() — leading/trailing whitespace must be ignored.
+
+        The dedup gate at line 71 uses `last.get("grammar", "").strip() == grammar.strip()`.
+        This test characterizes that a stored entry with trailing whitespace is correctly
+        recognized as identical to the new input, preventing spurious append on whitespace-only
+        changes. Without this assertion the contract would rely solely on an implicit behavior;
+        future refactorers might accidentally weaken .strip() to == or vice versa.
+        """
+        # First: store with clean grammar
+        append_grammar_revision(run_dir, "dedup_strip_test", grammar="rule_a", action="initial")
+        history = append_grammar_revision(
+            run_dir, "dedup_strip_test", grammar="  rule_a  ", action="initial"
+        )
+        assert len(history) == 1  # dedup matched via strip()
+
+    def test_dedup_matches_when_stored_entry_has_leading_whitespace(self, run_dir):
+        """Dedup must recognize a previously-stored entry as duplicate even when it contains leading whitespace.
+
+        The stored entry has leading whitespace (e.g., from LLM output with indent);
+        the new grammar is clean. Both .strip() equal "rule_a" — dedup triggers, no append.
+        This characterizes that strip()-based comparison works symmetrically in both directions
+        of the == check on line 71: `last.get("grammar", "").strip()` AND `grammar.strip()`.
+        """
+        path = _history_path(run_dir, "dedup_stored_ws")
+        import json as _json
+        # Pre-seed a stored entry with leading whitespace in grammar field
+        malformed_history = [
+            {"id": "old", "created_at": "2024-01-01T00:00:00", "action": "initial", "grammar": "  rule_a  "},
+        ]
+        path.write_text(_json.dumps(malformed_history))
+
+        history = append_grammar_revision(
+            run_dir, "dedup_stored_ws", grammar="rule_a", action="initial"
+        )
+        assert len(history) == 1  # dedup matched despite leading whitespace in stored entry
+
+    def test_rotation_persists_to_disk(self, run_dir):
+        for i in range(10):
+            append_grammar_revision(run_dir, "test", grammar=f"rule_{i}", action="update")
+        # Read back — should reflect trimmed state (default max_revisions=100)
+        loaded = load_grammar_history(run_dir, "test")
+        assert len(loaded) == 10
+
+    def test_rotation_with_small_max_persists(self, run_dir):
+        for i in range(5):
+            append_grammar_revision(run_dir, "small_test", grammar=f"s{i}", action="update", max_revisions=3)
+        loaded = load_grammar_history(run_dir, "small_test")
+        assert len(loaded) == 3
+        assert loaded[0]["grammar"] == "s2"
+
+
+class TestAppendGrammarMalformedHistory:
+    def test_skipped_dedup_when_last_entry_missing_action(self, run_dir):
+        """Malformed last entry (missing 'action') must fall through to append.
+
+        The dedup gate checks `last.get("action") == action`. If the existing
+        history's last entry is missing the 'action' key, .get() returns None,
+        which never equals a real action string — so the revision appends rather
+        than being silently dropped. This characterizes defensive handling of
+        corrupt/incomplete entries in existing history files.
+        """
+        path = _history_path(run_dir, "malformed_test")
+        # Pre-seed a malformed entry missing 'action'
+        malformed_history = [
+            {"id": "old", "created_at": "2024-01-01T00:00:00", "grammar": "rule_a"},
+        ]
+        path.write_text(json.dumps(malformed_history))
+
+        history = append_grammar_revision(
+            run_dir, "malformed_test", grammar="rule_b", action="update"
+        )
+        assert len(history) == 2
+        assert history[1]["action"] == "update"
+        assert history[1]["grammar"] == "rule_b"
+
+    def test_skipped_dedup_when_last_entry_missing_grammar(self, run_dir):
+        """Malformed last entry (missing 'grammar') must fall through to append.
+
+        The dedup gate checks `last.get("grammar", "")`. If the existing history's
+        last entry is missing the 'grammar' key, .get() returns "", which never
+        equals a real grammar string — so the revision appends rather than being
+        silently dropped. This characterizes defensive handling of corrupt/
+        incomplete entries in existing history files.
+        """
+        path = _history_path(run_dir, "malformed_test2")
+        # Pre-seed a malformed entry missing 'grammar'
+        malformed_history = [
+            {"id": "old", "created_at": "2024-01-01T00:00:00", "action": "initial"},
+        ]
+        path.write_text(json.dumps(malformed_history))
+
+        history = append_grammar_revision(
+            run_dir, "malformed_test2", grammar="rule_b", action="update"
+        )
+        assert len(history) == 2
+        assert history[1]["action"] == "update"
+
+    def test_non_list_json_history_falls_through_to_single_entry(self, run_dir):
+        """Non-list JSON on disk → load_grammar_history returns [] → dedup sees last=None.
+
+        The dedup gate at append_grammar_revision compares `last.get("grammar", "")` and
+        `last.get("action")` against the new values. When history is loaded from a file
+        containing non-list JSON (e.g., {"key": "value"}), load returns an empty list —
+        so last becomes None, .get() on None never matches, and append proceeds with
+        exactly one entry. This characterizes that corrupt-or-foreign-format files are
+        treated as "no usable history" rather than raising or overwriting the file.
+        """
+        path = _history_path(run_dir, "nonlist_test")
+        # Pre-seed a non-list JSON structure (dict instead of list)
+        foreign_data = {"origin": ["something"], "config": 42}
+        path.write_text(json.dumps(foreign_data))
+
+        history = append_grammar_revision(
+            run_dir, "nonlist_test", grammar="rule_a", action="initial"
+        )
+        assert len(history) == 1
+        assert history[0]["action"] == "initial"
+        assert history[0]["grammar"] == "rule_a"
+        # ID is timestamp-based when loaded from empty state (not synthetic "initial")
+
+    def test_extra_keys_in_last_entry_do_not_disrupt_dedup(self, run_dir):
+        """History entries with extra/unexpected keys must not interfere with dedup.
+
+        The dedup gate only inspects 'grammar' and 'action' via .get(). Extra keys
+        (e.g., metadata injected by upstream callers) are ignored — neither the dedup
+        decision nor the appended entry is affected. This locks in that the function
+        does not enumerate or reject unknown fields, so future extensions can safely
+        carry auxiliary data on history entries without breaking append semantics.
+        """
+        path = _history_path(run_dir, "extra_keys_test")
+        enriched_history = [
+            {
+                "id": "old",
+                "created_at": "2024-01-01T00:00:00",
+                "action": "initial",
+                "grammar": "rule_a",
+                "metadata": {"source": "upstream"},  # extra key
+                "tags": ["v1"],                       # extra key
+            },
+        ]
+        path.write_text(json.dumps(enriched_history))
+
+        history = append_grammar_revision(
+            run_dir, "extra_keys_test", grammar="rule_a", action="initial"
+        )
+        assert len(history) == 1  # dedup skipped the append (same grammar+action)
+
+    def test_extra_keys_in_last_entry_allow_append_on_different_action(self, run_dir):
+        """Extra keys in the last entry must not block appending when action differs.
+
+        When the new action does not match `last["action"]`, the dedup gate falls
+        through and appends — extra keys are irrelevant to this decision. This test
+        confirms that the function's append path is fully independent of unknown
+        fields in existing entries, even mid-session state changes.
+        """
+        path = _history_path(run_dir, "extra_keys_diff_action")
+        enriched_history = [
+            {
+                "id": "old",
+                "created_at": "2024-01-01T00:00:00",
+                "action": "initial",
+                "grammar": "rule_a",
+                "metadata": {"source": "upstream"},
+            },
+        ]
+        path.write_text(json.dumps(enriched_history))
+
+        history = append_grammar_revision(
+            run_dir, "extra_keys_diff_action", grammar="rule_a", action="update"
+        )
+        assert len(history) == 2  # different action → appended despite same grammar
+        assert history[1]["action"] == "update"
+
+
+class TestGetRecentRevisions:
+    def test_action_filter_keeps_only_matching_recent_entries(self):
+        history = [
+            {"id": "r0", "action": "initial", "grammar": "g0"},
+            {"id": "r1", "action": "update", "grammar": "g1"},
+            {"id": "r2", "action": "rollback", "grammar": "g2"},
+            {"id": "r3", "action": "update", "grammar": "g3"},
+        ]
+
+        result = get_recent_revisions(history, n=3, action_filter="update")
+
+        assert [entry["id"] for entry in result] == ["r1", "r3"]
+
+    def test_action_filter_composes_with_action_only_projection(self):
+        history = [
+            {"id": "r0", "action": "initial", "grammar": "g0"},
+            {"id": "r1", "action": "update", "grammar": "g1"},
+            {"id": "r2", "action": "update", "grammar": "g2"},
+        ]
+
+        result = get_recent_revisions(
+            history, n=10, action_filter="update", include_action=True
+        )
+
+        assert result == [{"action": "update"}, {"action": "update"}]
+
+    def test_action_filter_with_no_matches_returns_empty_list(self):
+        """action_filter with zero matching entries must return [].
+
+        Every existing action_filter test has at least one surviving entry. The
+        docstring contract ("A non-matching value returns an empty list") is only
+        exercisable when no entry's action matches. This locks in the zero-match
+        boundary: a non-matching filter must not leak unfiltered entries or raise,
+        so future refactors of the filter comprehension keep it intact.
+        """
+        history = [
+            {"id": "r0", "action": "initial", "grammar": "g0"},
+            {"id": "r1", "action": "update", "grammar": "g1"},
+            {"id": "r2", "action": "update", "grammar": "g2"},
+        ]
+
+        result = get_recent_revisions(history, n=3, action_filter="rollback")
+
+        assert result == []
+
+    def test_action_filter_applies_to_recent_window_not_full_history(self):
+        """action_filter must narrow the sliced recent window, not the full history.
+
+        The production order is slice-then-filter: the most recent ``n`` entries
+        are taken first, then the filter drops non-matching entries from that
+        window — so the result may hold fewer than ``n`` entries (docstring:
+        "at most ``n`` recent revisions").
+
+        Every existing action_filter test keeps its matching entries inside the
+        recent window (or covers the whole history), so an implementation that
+        filtered the full history before slicing would pass them all. Here an
+        older matching entry (r0) sits outside the n=3 window behind two
+        non-matching entries: a filter-before-slice regression would
+        incorrectly resurrect it.
+        """
+        history = [
+            {"id": "r0", "action": "update", "grammar": "g0"},
+            {"id": "r1", "action": "rollback", "grammar": "g1"},
+            {"id": "r2", "action": "rollback", "grammar": "g2"},
+            {"id": "r3", "action": "update", "grammar": "g3"},
+        ]
+
+        result = get_recent_revisions(history, n=3, action_filter="update")
+
+        assert [entry["id"] for entry in result] == ["r3"]
+
+    def test_action_filter_applies_to_full_copy_when_n_zero(self):
+        """action_filter must narrow the n<=0 full-copy branch, not just the window.
+
+        The n<=0 branch builds ``result`` via ``list(history)`` — the entire history,
+        not a slice — and the action_filter comprehension then runs over that result.
+        Every existing action_filter test uses a positive n, and every n<=0 test omits
+        the filter, so the documented composition of the two is unexercised: a refactor
+        that gated the filter on ``n > 0`` (silently returning unfiltered entries on
+        the full-copy path) or that made ``n=0`` mean "no entries" would pass them all.
+        """
+        history = [
+            {"id": "r0", "action": "update", "grammar": "g0"},
+            {"id": "r1", "action": "rollback", "grammar": "g1"},
+            {"id": "r2", "action": "update", "grammar": "g2"},
+        ]
+
+        result = get_recent_revisions(history, n=0, action_filter="update")
+
+        assert [entry["id"] for entry in result] == ["r0", "r2"]
+
+    def test_include_action_none_returns_full_entries(self):
+        """include_action=None must return full entries (like False, not like True).
+
+        The dedup gate at line 106 checks `if include_action and isinstance(result, list)`.
+        Since None is falsy in Python, passing None explicitly should NOT trigger the
+        action-only reduction — it should behave identically to False. This characterizes
+        that any falsy value (None, False, 0, "") passes through without triggering the
+        reduction path, so callers can safely omit the parameter or pass None without
+        accidentally getting reduced entries.
+
+        Verifies the contract: only truthy values trigger include_action; all others
+        (including explicit None) return full unmodified entries.
+        """
+        history = [
+            {"id": "r0", "action": "a_0", "grammar": "g_0"},
+            {"id": "r1", "action": "a_1", "grammar": "g_1"},
+            {"id": "r2", "action": "a_2", "grammar": "g_2"},
+        ]
+
+        result = get_recent_revisions(history, n=3, include_action=None)
+
+        assert len(result) == 3
+        for entry in result:
+            # Must contain the full entry dict, not just {action: ...}
+            assert "id" in entry
+            assert "action" in entry
+            assert "grammar" in entry
+            assert set(entry.keys()) > {"action"}
+
+    def test_action_filter_reduces_entry_to_single_key(self, run_dir):
+        """include_action=True must reduce each entry to {action: ...}.
+
+        Verifies that when include_action=True is passed, the returned entries
+        contain ONLY the 'action' key — not id, created_at, grammar, or any other
+        fields from the source history. This characterizes the action-filtering
+        contract so future refactors don't accidentally leak full entries through
+        the reduction path.
+        """
+        history = [
+            {
+                "id": f"r{i}",
+                "created_at": f"2024-01-{i+1:02d}T00:00:00",
+                "action": f"a_{i}",
+                "grammar": f"g_{i}",
+            }
+            for i in range(5)
+        ]
+
+        result = get_recent_revisions(history, n=3, include_action=True)
+
+        assert len(result) == 3
+        for entry in result:
+            assert set(entry.keys()) == {"action"}
+            assert isinstance(entry["action"], str)
+
+    def test_returns_n_most_recent_entries(self, run_dir):
+        """Default slicing returns the last n entries in order."""
+        history = [
+            {"id": f"rev{i}", "created_at": f"2024-01-{i+1:02d}T00:00:00", "action": "update", "grammar": f"rule_{i}"}
+            for i in range(5)
+        ]
+        result = get_recent_revisions(history, n=3)
+        assert len(result) == 3
+        assert result[0]["id"] == "rev2"
+        assert result[-1]["id"] == "rev4"
+
+    def test_returns_full_copy_when_n_zero(self):
+        """n=0 must return a shallow copy of the entire history."""
+        history = [
+            {"id": f"r{i}", "action": "a", "grammar": f"g{i}"} for i in range(3)
+        ]
+        result = get_recent_revisions(history, n=0)
+        assert len(result) == 3
+        # Shallow copy — identity differs from original
+        assert result is not history
+
+    def test_returns_full_copy_when_n_negative(self):
+        """n<0 behaves like n<=0: full shallow copy of all entries."""
+        history = [{"id": "x", "action": "a", "grammar": "g"}]
+        result = get_recent_revisions(history, n=-5)
+        assert len(result) == 1
+        assert result is not history
+
+    def test_include_action_returns_dicts_with_only_action(self):
+        """include_action=True reduces each entry to {action: ...}.
+
+        Verifies the reduction contract: returned dicts contain exactly one key,
+        and that key holds whatever the source entry's 'action' value was.
+        """
+        history = [
+            {"id": f"r{i}", "created_at": f"t{i}", "action": f"a_{i}", "grammar": f"g{i}"}
+            for i in range(4)
+        ]
+        result = get_recent_revisions(history, n=3, include_action=True)
+        assert len(result) == 3
+        for entry in result:
+            assert set(entry.keys()) == {"action"}
+
+    def test_include_action_respects_n_limit(self):
+        """include_action combined with n must slice first, then reduce."""
+        history = [
+            {"id": f"r{i}", "created_at": f"t{i}", "action": f"a_{i}", "grammar": f"g{i}"}
+            for i in range(5)
+        ]
+        result = get_recent_revisions(history, n=2, include_action=True)
+        assert len(result) == 2
+        assert [e["action"] for e in result] == ["a_3", "a_4"]
+
+    def test_does_not_mutate_original(self):
+        """Returned list must not share references that allow mutation of source."""
+        history = [{"id": f"r{i}", "action": f"a_{i}"} for i in range(5)]
+        result = get_recent_revisions(history, n=2)
+        result[0]["id"] = "MUTATED"
+        assert history[-1]["id"] == "r4"
+
+    def test_include_action_with_full_copy_n_zero(self):
+        """include_action=True with n<=0 reduces every entry to {action: ...} across full history.
+
+        The slicing branch is bypassed when n<=0 (full copy path), but the action-only
+        reduction must still apply uniformly to every entry — not just a slice of them.
+        This test characterizes that cross-branch behavior so future refactors do not
+        accidentally gate the reduction on positive n only.
+        """
+        history = [
+            {"id": f"r{i}", "created_at": f"t{i}", "action": f"a_{i}", "grammar": f"g{i}"}
+            for i in range(4)
+        ]
+        result = get_recent_revisions(history, n=0, include_action=True)
+        assert len(result) == 4
+        for entry in result:
+            assert set(entry.keys()) == {"action"}
+        # Verify every entry is reduced — no leftover keys from source dicts
+        assert all(len(e) == 1 for e in result)
+
+    def test_include_action_with_missing_action_key(self):
+        """include_action=True with entries missing 'action' must return {action: None}.
+
+        The reduction path at line 107 uses `e.get("action")`. When an entry has no
+        ``action`` key, ``.get()`` returns None — the action-only reducer faithfully
+        passes through this sentinel rather than raising or substituting a default
+        string. This test characterizes that defensive handling so callers know
+        get_recent_revisions is safe on partially-populated history entries without
+        crashing, and documents the exact return shape ``{"action": None}`` for
+        missing keys.
+        """
+        history = [
+            {"id": "r0", "grammar": "g_0"},
+            {"id": "r1", "grammar": "g_1"},
+        ]
+
+        result = get_recent_revisions(history, n=2, include_action=True)
+
+        assert len(result) == 2
+        for entry in result:
+            assert set(entry.keys()) == {"action"}
+            assert entry["action"] is None
+
+    def test_empty_history_returns_empty_list(self):
+        """Empty input must yield empty output regardless of n."""
+        result = get_recent_revisions([], n=5)
+        assert result == []
+
+    def test_empty_history_with_include_action_and_positive_n(self):
+        """Empty history + include_action=True + positive n exercises both branches.
+
+        Characterizes the cross-branch contract: `history[-n:]` on an empty list
+        yields [], then the reduction branch iterates over zero entries — producing
+        []. This locks in that include_action does not crash or behave differently
+        when the sliced result is empty, so future refactors cannot gate it behind
+        a non-empty guard.
+        """
+        result = get_recent_revisions([], n=5, include_action=True)
+        assert result == []
+
+    def test_n_exceeds_history_length_returns_all_entries(self):
+        """When n > len(history), slicing returns all entries — Python's slice
+        underflow is graceful, not an error.
+
+        Characterizes the `history[-n:]` gate at line 104: callers may pass a
+        generous n (e.g., max_revisions=10) on a small history without triggering
+        IndexError or truncation surprises. This test locks in that the function
+        returns every available entry rather than raising or returning [].
+        """
+        history = [
+            {"id": "a", "action": "init", "grammar": "g_a"},
+            {"id": "b", "action": "update", "grammar": "g_b"},
+            {"id": "c", "action": "update", "grammar": "g_c"},
+        ]
+        result = get_recent_revisions(history, n=10)
+        assert len(result) == 3
+        assert [e["id"] for e in result] == ["a", "b", "c"]
+
+    def test_n_exceeds_history_with_include_action(self):
+        """include_action=True with n > len(history) must still reduce every entry.
+
+        Verifies the cross-branch contract: when slicing returns all entries
+        (because n exceeds history length), the action-only reduction applies
+        uniformly to every returned dict — not just a truncated slice. This
+        locks in that the include_action branch is independent of how many
+        entries were sliced, so future refactors cannot gate it behind an
+        n <= len(history condition.
+        """
+        history = [
+            {"id": "a", "action": "init", "grammar": "g_a"},
+            {"id": "b", "action": "update", "grammar": "g_b"},
+        ]
+        result = get_recent_revisions(history, n=100, include_action=True)
+        assert len(result) == 2
+        for entry in result:
+            assert set(entry.keys()) == {"action"}

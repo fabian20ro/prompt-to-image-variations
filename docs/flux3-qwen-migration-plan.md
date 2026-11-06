@@ -1,6 +1,6 @@
 # FLUX 3 Image Klein and Qwen migration plan
 
-Date: 2026-11-06. Implementation update: 2026-11-07 — caption-only migration implemented with seam-first TDD; 375 tests passing after final review fixes, and browser grammar workflows verified. Saved FLUX q4 passes fresh-process offline rendering; two consecutive Qwen → FLUX → SeedVR2 cycles passed with memory released and LM Studio empty. Approved source cache removed (18.9 GiB); saved q4 and SeedVR2 retained. Tuned live Qwen corpus accepts 23/24 requests (one safely rejected after repair). See [verification evidence](flux3-verification.md). ERNIE checkpoint removed at the user's explicit request. Optional structured layout remains deferred. Sections below retain the original planning baseline.
+Date: 2026-11-06. Implementation update: 2026-11-07 — caption-only migration implemented with seam-first TDD; merged master and verified 1118 tests on Python 3.11/3.13 (375 before merge), with browser grammar workflows previously verified. Saved FLUX q4 passes fresh-process offline rendering; two consecutive Qwen → FLUX → SeedVR2 cycles passed with memory released and LM Studio empty before the master merge. Approved source cache removed (18.9 GiB); saved q4 and SeedVR2 retained. Tuned live Qwen corpus accepts 23/24 requests (one safely rejected after repair). See [verification evidence](flux3-verification.md). ERNIE checkpoint removed at the user's explicit request. Optional structured layout remains deferred. Sections below retain the original planning baseline.
 
 ## Current status
 

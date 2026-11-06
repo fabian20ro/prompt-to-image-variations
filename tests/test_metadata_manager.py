@@ -106,6 +106,34 @@ class TestMetadataManager:
         result = MetadataManager.find_metadata_file(temp_dir)
         assert result is None
 
+    def test_find_legacy_metadata_pattern(self, temp_dir):
+        """Test find_metadata_file returns legacy _metadata.json files for backward compatibility.
+
+        The search loop in find_metadata_file supports the old *_metadata.json naming
+        convention alongside new *.metaprompt.json files. This test ensures that legacy
+        metadata directories (pre-refactor) are still discovered correctly.
+        """
+        meta_file = temp_dir / "test_metadata.json"
+        meta_file.write_text('{"prefix": "legacy"}')
+
+        result = MetadataManager.find_metadata_file(temp_dir)
+        assert result == meta_file
+
+    def test_find_metaprompt_before_legacy(self, temp_dir):
+        """Test that new .metaprompt.json takes precedence over legacy _metadata.json.
+
+        When both naming patterns coexist in the same directory, the modern file wins —
+        matching the iteration order in find_metadata_file's glob loop.
+        """
+        legacy = temp_dir / "test_legacy_metadata.json"
+        legacy.write_text('{"prefix": "legacy"}')
+
+        modern = temp_dir / "test.metaprompt.json"
+        modern.write_text('{"prefix": "modern"}')
+
+        result = MetadataManager.find_metadata_file(temp_dir)
+        assert result == modern
+
     def test_load_success(self, temp_dir):
         """Test loading metadata successfully."""
         data = {"prefix": "test", "count": 5, "user_prompt": "hello"}
@@ -140,6 +168,18 @@ class TestMetadataManager:
         assert result["prefix"] == "test"
         assert result["custom"] == "value"
 
+    def test_load_raw_not_found(self, temp_dir):
+        """Test loading raw when no metadata file exists."""
+        with pytest.raises(MetadataNotFoundError, match="No metadata file found"):
+            MetadataManager.load_raw(temp_dir)
+
+    def test_load_raw_invalid_json(self, temp_dir):
+        """Test loading raw metadata with invalid JSON."""
+        (temp_dir / "test.metaprompt.json").write_text("{invalid json")
+
+        with pytest.raises(MetadataError, match="Invalid JSON"):
+            MetadataManager.load_raw(temp_dir)
+
     def test_save_with_dict(self, temp_dir):
         """Test saving metadata from dictionary."""
         data = {"prefix": "myprefix", "count": 10}
@@ -160,6 +200,14 @@ class TestMetadataManager:
         assert result.name == "custom.metaprompt.json"
         saved = json.loads(result.read_text())
         assert saved["count"] == 20
+        # Unset optional fields must stay off-disk: to_dict only emits
+        # optional keys when truthy, so a minimal run serializes to
+        # exactly the six base keys. A refactor that emits them
+        # unconditionally would add null/empty keys to every minimal file.
+        assert set(saved.keys()) == {
+            "prefix", "count", "user_prompt", "model", "created_at",
+            "grammar_cached",
+        }
 
     def test_save_creates_directory(self, temp_dir):
         """Test that save creates directory if needed."""
@@ -170,6 +218,15 @@ class TestMetadataManager:
 
         assert result.exists()
         assert nested.exists()
+
+    def test_save_atomic_write(self, temp_dir):
+        """Test that save uses atomic write (tempfile + os.replace)."""
+        from unittest.mock import patch as mock_patch
+        data = {"prefix": "test", "count": 5}
+
+        with mock_patch("metadata_manager.os.replace") as replace_mock:
+            result = MetadataManager.save(temp_dir, data)
+            replace_mock.assert_called_once()
 
     def test_update(self, temp_dir):
         """Test updating specific fields."""
@@ -208,6 +265,166 @@ class TestMetadataManager:
         (temp_dir / "test.metaprompt.json").write_text('{"prefix": "test"}')
         assert MetadataManager.exists(temp_dir) is True
 
+    def test_update_deletion_roundtrip(self, temp_dir):
+        """Test that deleted keys are absent after reload via load_raw."""
+        initial = {"prefix": "test", "count": 5, "user_prompt": "original", "model": "ernie"}
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        MetadataManager.update(temp_dir, user_prompt=None)
+
+        # Roundtrip through load_raw — the deleted key must not reappear
+        raw = MetadataManager.load_raw(temp_dir)
+        assert "user_prompt" not in raw
+        assert raw["count"] == 5
+        assert raw["prefix"] == "test"
+
+    def test_update_merges_dict_fields(self, temp_dir):
+        """Test that dict-valued updates merge into existing dicts."""
+        initial = {
+            "prefix": "test",
+            "image_generation": {
+                "enabled": True,
+                "width": 1024,
+                "height": 768,
+            },
+        }
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        result = MetadataManager.update(
+            temp_dir, image_generation={"width": 512, "format": "png"}
+        )
+
+        assert result.image_generation["enabled"] is True
+        assert result.image_generation["width"] == 512
+        assert result.image_generation["height"] == 768
+        assert result.image_generation["format"] == "png"
+
+    def test_update_overwrites_non_dict_value(self, temp_dir):
+        """Test that non-dict updates overwrite scalar values directly."""
+        initial = {"prefix": "test", "count": 5}
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        result = MetadataManager.update(temp_dir, count=42)
+
+        assert result.count == 42
+        saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
+        assert saved["count"] == 42
+
+    def test_update_overwrites_scalar_with_dict(self, temp_dir):
+        """Test that a dict value overwrites an existing scalar field on disk.
+
+        When the existing key holds a non-dict (e.g. int) and the update
+        supplies a dict, the merge branch is skipped and the dict replaces
+        the value wholesale — matching line 268 in metadata_manager.py's
+        isinstance guard logic. Note: this also exposes that RunMetadata
+        rejects non-int counts via __post_init__, so we assert only on-disk.
+        """
+        initial = {"prefix": "test", "count": 5}
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        with pytest.raises(TypeError):
+            MetadataManager.update(temp_dir, count={"nested": "value"})
+
+        saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
+        assert saved["count"] == {"nested": "value"}
+        # Confirm the field was replaced entirely — not merged into an int
+        assert isinstance(saved["count"], dict)
+
+    def test_update_overwrites_dict_with_scalar(self, temp_dir):
+        """Test that a scalar value overwrites an existing dict field on disk.
+
+        When the existing key holds a dict and the update supplies a
+        non-dict (e.g. string), the merge branch is skipped and the
+        scalar replaces the dict wholesale — matching line 267 in
+        metadata_manager.py's isinstance guard logic.
+        """
+        initial = {
+            "prefix": "test",
+            "image_generation": {"enabled": True, "width": 1024},
+        }
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        result = MetadataManager.update(temp_dir, image_generation="removed")
+
+        saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
+        assert saved["image_generation"] == "removed"
+        # Confirm the dict was replaced entirely — not merged with a string
+        assert isinstance(saved["image_generation"], str)
+
+    def test_update_adds_missing_key(self, temp_dir):
+        """Test that update adds a key absent from existing metadata.
+
+        When the update supplies a value for a key not present in the
+        original JSON (e.g. 'regenerated_at' on first generation), the
+        merge branch is skipped and the new key is inserted — matching
+        line 268 in metadata_manager.py's isinstance guard logic.
+        """
+        initial = {"prefix": "test", "count": 5}
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        result = MetadataManager.update(temp_dir, source="pipeline")
+
+        assert result.source == "pipeline"
+        saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
+        assert saved["source"] == "pipeline"
+        # Other fields must be preserved — not lost by the update path
+        assert saved["prefix"] == "test"
+        assert saved["count"] == 5
+
+    def test_update_none_for_missing_key_is_silent_noop(self, temp_dir):
+        """Test that passing None for a key absent from metadata is silent.
+
+        When the update supplies None for a key not present in the existing JSON,
+        the elif branch at line 279 does nothing — the key stays absent and no error
+        is raised. This matches the delete-branch behavior in metadata_manager.py's
+        update loop: `elif key in data: del data[key]`.
+        """
+        initial = {"prefix": "test", "count": 5}
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        result = MetadataManager.update(temp_dir, nonexistent_key=None)
+
+        # No error raised — silent noop
+        assert isinstance(result, RunMetadata)
+        saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
+        assert "nonexistent_key" not in saved
+        assert saved["count"] == 5
+
+    def test_update_multi_key_mixed_types(self, temp_dir):
+        """Test updating multiple keys of different types in a single call.
+
+        When update() receives mixed scalar and dict updates simultaneously,
+        each key must be processed independently — scalar overwrites must not
+        interfere with dict merges on other keys. This exercises both branches
+        of the isinstance guard logic (lines 273-280) in one atomic operation.
+        """
+        initial = {
+            "prefix": "test",
+            "count": 5,
+            "user_prompt": "original prompt",
+            "image_generation": {"enabled": True, "width": 1024},
+        }
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps(initial))
+
+        result = MetadataManager.update(
+            temp_dir, count=99, user_prompt=None, image_generation={"height": 768}
+        )
+
+        # Scalar overwrite: count must be updated to new value
+        assert result.count == 99
+        saved = json.loads((temp_dir / "test.metaprompt.json").read_text())
+        assert saved["count"] == 99
+
+        # Key deletion via None: user_prompt must be removed from disk
+        assert "user_prompt" not in saved
+
+        # Dict merge: enabled preserved, height added, width updated
+        assert result.image_generation["enabled"] is True
+        assert result.image_generation["width"] == 1024
+        assert result.image_generation["height"] == 768
+        # Other fields must be preserved — not lost by the update loop
+        assert saved["prefix"] == "test"
+
     def test_get_prefix(self, temp_dir):
         """Test getting prefix from metadata."""
         (temp_dir / "myprefix.metaprompt.json").write_text('{"prefix": "myprefix"}')
@@ -244,6 +461,19 @@ class TestMetadataManager:
         settings = MetadataManager.get_image_settings(temp_dir)
         assert settings == {}
 
+    def test_get_gallery_layout_missing_metadata(self, temp_dir):
+        """Test get_gallery_layout returns deterministic defaults when metadata is absent.
+
+        When no metadata file exists the load path raises MetadataNotFoundError;
+        the fallback must resolve to concrete values — not None or empty — so callers
+        can safely use them for layout decisions without further guard checks.
+        """
+        layout = MetadataManager.get_gallery_layout(temp_dir, prompt_count=3)
+
+        assert isinstance(layout, dict), "fallback must return a dict"
+        assert layout["images_per_prompt"] == 1
+        assert layout["max_prompts"] is None
+
     def test_resolve_gallery_layout_preserves_explicit_zero_images_per_prompt(self):
         """Explicit zero-image layouts should survive normalization."""
         metadata = {
@@ -261,6 +491,89 @@ class TestMetadataManager:
 
         assert layout["images_per_prompt"] == 0
         assert layout["max_prompts"] == 2
+
+    def test_resolve_gallery_layout_with_run_metadata(self):
+        """Test fallback resolution when called with a RunMetadata object."""
+        metadata = RunMetadata(
+            prefix="test",
+            count=5,
+            image_generation={"images_per_prompt": 3, "max_prompts": 10},
+        )
+
+        layout = resolve_gallery_layout(metadata, prompt_count=4)
+
+        assert layout["images_per_prompt"] == 3
+        assert layout["max_prompts"] == 4
+
+    def test_resolve_gallery_layout_clamps_max_prompts_floor(self):
+        """A persisted max_prompts below 1 is clamped up to the minimum of 1.
+
+        The normalization tail of resolve_gallery_layout runs
+        ``max_prompts = max(1, int(max_prompts))`` for any non-None value, so
+        an older run that persisted ``max_prompts: 0`` must not resolve to 0
+        (which would make the gallery empty) — it clamps to 1.
+        """
+        metadata = {
+            "gallery_layout": {
+                "images_per_prompt": 2,
+                "max_prompts": 0,
+            },
+        }
+
+        layout = resolve_gallery_layout(metadata)
+
+        assert layout["images_per_prompt"] == 2
+        assert layout["max_prompts"] == 1
+
+    def test_resolve_gallery_layout_explicit_none_max_prompts_not_fall_back(self):
+        """An explicit null max_prompts in gallery_layout is respected, not a fallback trigger.
+
+        resolve_gallery_layout's max_prompts fallback guard is asymmetric: it falls back
+        to image_generation's max_prompts only when the ``max_prompts`` key is *absent*
+        from gallery_layout, not when the key is present with a null value. This matches
+        the ``if max_prompts is None and "max_prompts" not in gallery_layout`` guard in
+        metadata_manager.py.
+
+        A persisted explicit null therefore means "no prompt cap" and must resolve to
+        None, even when image_generation carries a max_prompts value. A refactor that
+        simplifies the guard to a plain ``is None`` check would wrongly resurrect the
+        cap from image_generation (None -> 5 here).
+        """
+        metadata = {
+            "gallery_layout": {"max_prompts": None},
+            "image_generation": {"max_prompts": 5},
+        }
+
+        layout = resolve_gallery_layout(metadata)
+
+        # Explicit null in gallery_layout must NOT fall back to image_generation.
+        assert layout["max_prompts"] is None
+        # Sibling field still resolves independently (key absent -> default 1).
+        assert layout["images_per_prompt"] == 1
+
+    def test_resolve_gallery_layout_explicit_none_images_per_prompt_falls_back(self):
+        """An explicit null images_per_prompt in gallery_layout falls back to image_generation.
+
+        The images_per_prompt fallback is the inverse of the max_prompts guard:
+        it falls back to image_generation's value whenever the resolved value is
+        None — including when the key is present with a null value — matching
+        the ``if images_per_prompt is None`` checks in metadata_manager.py. An
+        explicit null therefore means "unspecified" and must pick up
+        image_generation's value (unlike an explicit null max_prompts, which
+        means "no cap"). A guard simplified to only the absent-key case, or one
+        that coerces null to a concrete number, would not return 3 here.
+        """
+        metadata = {
+            "gallery_layout": {"images_per_prompt": None},
+            "image_generation": {"images_per_prompt": 3},
+        }
+
+        layout = resolve_gallery_layout(metadata, prompt_count=4)
+
+        # Explicit null must fall back to image_generation's value, not 0/1/None.
+        assert layout["images_per_prompt"] == 3
+        # max_prompts key absent from both -> no cap.
+        assert layout["max_prompts"] is None
 
 
 class TestConvenienceFunctions:

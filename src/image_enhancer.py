@@ -21,6 +21,17 @@ def clear_enhancer_cache():
         mx.clear_cache()
 
 
+def enhancer_is_loaded(tiled_vae: bool = False) -> bool:
+    """Check whether the SeedVR2 model is already loaded in unified memory.
+
+    Returns True only when the enhancer cache holds an entry for the
+    given tiling key, so the server UI can tell users whether the next
+    enhancement request will start immediately or wait for a cold model
+    load.
+    """
+    return tiled_vae in _enhancer_cache
+
+
 def _get_enhancer(tiled_vae: bool = False):
     """Get or create a cached SeedVR2 enhancer instance."""
     cache_key = tiled_vae
@@ -139,11 +150,11 @@ def collect_images(path_spec: str) -> list[Path]:
         raise ValueError(f"Not an image file: {path}")
 
     elif path.is_dir():
-        # Directory - find all images
+        # Directory - find all images, recursing into symlinked subdirectories
         images = []
         for ext in image_extensions:
-            images.extend(path.glob(f"*{ext}"))
-            images.extend(path.glob(f"*{ext.upper()}"))
+            images.extend(path.rglob(f"*{ext}"))
+            images.extend(path.rglob(f"*{ext.upper()}"))
         images = sorted(set(images))
         if not images:
             raise ValueError(f"No images found in directory: {path}")
