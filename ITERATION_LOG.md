@@ -48,6 +48,7 @@ Each entry should follow this structure:
 **Insight:** For this repo’s current flat-import layout, `uv` works cleanly with `tool.uv.package = false`; switching to package/module entrypoints would be a separate refactor.
 **Promoted to Lessons Learned:** Yes
 
+
 ---
 
 ### [2026-02-24] AI Agent Configuration Restructuring
@@ -312,3 +313,56 @@ Each entry should follow this structure:
 ---
 
 <!-- New entries go above this line, most recent first -->
+
+### [2026-11-06] Audited current state and planned Qwen and FLUX 3 migration
+
+**Context:** User requested current status and a thorough migration plan, not implementation.
+**What happened:** Verified clean committed baseline, 361 passing tests and Ruff; inspected LM Studio inventory (Qwen3.8 Splash loaded, configured Gemma absent), current dependencies, model cache, prompting, validation, and memory lifecycle. Verified FLUX 3 Image Klein support and official prompt guidance. Added `docs/flux3-qwen-migration-plan.md` with phased changes and acceptance gates.
+**Outcome:** Plan prepared. No application changes, downloads, or model unloads. Found a reproducible layout incompatibility: Tracery strips literal bounding-box arrays.
+**Insight:** FLUX layout JSON must be serialized after Tracery expansion, not embedded unescaped inside grammar strings.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Removed ERNIE checkpoint to free disk space
+
+**Context:** User explicitly requested removing ERNIE due to limited disk space.
+**What happened:** Deleted `/Users/fabian/Library/Caches/mflux/models/ernie-image-turbo-4bit` (6.2 GB reported by du) and verified it is absent. No ERNIE-named repositories found in the default Hugging Face hub cache.
+**Outcome:** Checkpoint removed. Application code unchanged; image generation awaits the planned FLUX migration and replacement checkpoint.
+**Promoted to Lessons Learned:** No
+
+### [2026-11-07] Implemented caption-only FLUX 3/Qwen migration with seam-first TDD
+
+**Context:** User approved grammar/expansion, rendering/enhancement, pipeline artifacts, and CLI/API seams; requested Matt Pocock's TDD workflow. Hugging Face terms/login confirmed locally.
+**What happened:** Pinned mflux 0.24.0/Python >=3.11; migrated defaults to Qwen3.8 Splash and saved FLUX 3 Klein q4, 16 steps/no CFG. Rebuilt caption template/example, canvas-aware cache identity, graph validation, literal typography preservation, one bounded repair, and transient-only model-load retries. Added checkpoint/component guards, mandatory LM Studio unload, image-model/allocator handoffs, per-image actual-seed sidecars, consistent renderer provenance, early legacy/creation guards, and enhancement-only VAE controls. Invalid edits now validate before backups/deletion. Browser exercised grammar import, invalid cyclic save, and successful regeneration; fixed prompt-only image totals discovered there.
+**Outcome:** 380 automated tests passing; configured Ruff and diff whitespace checks clean. Real source download/quantization still running; corpus and GPU acceptance deliberately not yet claimed. Browser evidence run: `generated/prompts/20261107_002605_50da405c4032`.
+**Surprises:** Existing normal CLI dropped custom LM Studio URL/canvas; creation-resume could mismatch captions and old PNGs; quote cleanup could mutate valid visible text; Python GC alone did not address MLX allocator cache. Architect review identified these before hardware testing.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Verified saved FLUX q4 checkpoint and tuned against live Qwen corpus
+
+**Context:** Automated seams passed; real-model acceptance remained.
+**What happened:** mflux-save completed the gated source download and persisted q4. Fresh-process 512×512 render succeeded in 25.04s, peak MLX memory 5.875 GB; saved bundle 5,333,800,130 bytes. Recorded source revision `8454017f9ebaada30c998fccd9f67a80c7580f68`. First 24-request Qwen corpus passed 22 structurally/textually; two literal `Batch #1 [OPEN]` requests failed escaping even after repair. Added test-first protection of exact quoted user wording, preserving raw responses. Live samples also motivated scene-level ownership of lighting/background, a revised coherent seven-by-seven example, and quote-preserving cleanup of doubled boundary periods. Removed unused pipeline config types during review (nine dead-type tests removed); current suite count is not directly comparable with the previous snapshot.
+**Outcome:** Checkpoint hardware gate passed. Final tuned corpus and consecutive 1MP/SeedVR2 cycles still pending; intermediate corpus artifacts retained for honest comparison.
+**Promoted to Lessons Learned:** No
+
+### [2026-11-07] Verified full-size enhancement; isolated competing LM Studio reloads
+
+**Context:** User authorized deleting the FLUX source cache after hardware verification, preserving saved q4 and SeedVR2.
+**What happened:** Final corpus accepted 23/24 requests; one portrait grammar correctly failed after bounded repair (four alternatives). Full suite passed 372 tests; configured Ruff scope, dependency compatibility and diff whitespace checks passed. First hardware attempt stalled during tiled SeedVR2 encoding after a long cold download while Qwen had been reloaded. Unloaded it, stopped only our stalled test and retried. Standalone SeedVR2 512→1024 passed in 37.24s. Complete Qwen→FLUX 864×1152→SeedVR2 1728×2304 run passed in 350.35s, 15.926 GB peak MLX, zero active/cache allocation after release; enhanced poster visually checked.
+**Outcome:** Consecutive-cycle acceptance correctly failed because Qwen was loaded again by run end. LM Studio showed an active 61,696-context workload; app requests 8192. Server log confirms a later lms-cli load at 01:20:41 after app unload at 01:16:22. Asked user to pause competing clients; no unrelated processes killed or acceptance checks weakened. Source-cache deletion and offline isolation test remain pending. Added docs/flux3-verification.md with evidence and explicit caveats.
+**Surprise:** An external model reload can invalidate an otherwise correct memory handoff during a multi-minute image operation. The originating client is not established; do not label this as an application auto-reload bug.
+**Promoted to Lessons Learned:** No
+
+### [2026-11-07] Completed consecutive hardware acceptance and approved cache cleanup
+
+**Context:** User paused other LM Studio clients and requested resuming verification, then deleting the FLUX source cache on success.
+**What happened:** First resumed run produced a valid enhanced image in 214.77s but still saw CLI reloads; retained that failed lifecycle evidence. After unloading the remaining model, offline q4 rendering passed in 19.39s with an empty HF cache and no checkpoint symlinks. Two consecutive full Qwen→FLUX q4→SeedVR2 cycles then passed in 157.29s and 290.63s, each producing 1728×2304 at 15.926 GB peak MLX allocation. Both ended with empty LM Studio inventory and zero rounded active/cache MLX memory; both posters visually inspected. Reran automated checks: 372 passed, configured Ruff clean. Deleted only the approved FLUX HF source directory, 19,844,716 KiB (18.9 GiB). Verified saved q4 and SeedVR2 sizes unchanged. A post-deletion offline render passed in 19.48s.
+**Outcome:** Hardware acceptance and cleanup complete. Evidence: generated/verification/flux3-20261107-final-gate/e2e.json and post-cleanup.png. Updated verification report and migration status. Final Qwen corpus caveat remains 23/24 accepted, one correctly rejected after repair. No application changes or commits this iteration.
+**Insight:** An unload command does not prevent another client loading a model later; uninterrupted lifecycle acceptance requires coordination, not weaker checks.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Final two-axis review and commit preparation
+
+**Context:** User requested reviewing the final migration diff and committing it. Reviewed working tree against HEAD 2e4a432, including new plan, evidence, verifier and contract tests.
+**What happened:** Separate Standards and Spec reviewers identified one finding each: doubled backslashes could bypass action validation, and repeated quoted literals could double-escape visible hash text. Reproduced both through approved public seams with failing tests; fixed shared escape-aware graph parsing and single-pass longest-match literal protection, including already-escaped input. Both reviewers independently confirmed resolution. No unrelated refactor or external service changes.
+**Outcome:** 375 tests pass; configured Ruff and diff whitespace checks clean. Replayed all 23 accepted corpus grammars and both hardware grammars successfully. Hardware/model code unchanged; previous GPU acceptance remains applicable. Migration ready for the user-authorized semantic commit, including explicit breaking-change and provenance caveats. No push requested.
+**Promoted to Lessons Learned:** Yes

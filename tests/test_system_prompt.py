@@ -13,13 +13,9 @@ def test_get_system_prompt_default(tmp_path):
     # Then
     assert prompt == "generic prompt"
 
-def test_project_system_prompt_is_ernie_specific():
+def test_project_system_prompt_is_flux_specific():
     prompt = get_system_prompt()
-    assert "ERNIE-Image-Turbo" in prompt
+    assert "FLUX 3 Image Klein" in prompt
     assert "Tracery" in prompt
-    assert "Subject: exact identity" in prompt
-    assert "Description and details" in prompt
-    assert "Style and medium" in prompt
-    assert "Technical and capture finish" in prompt
-    assert "exactly 7 distinct" in prompt
-    assert "Never use 2–4 alternatives" in prompt
+    assert "continuous" in prompt
+    assert "TARGET CANVAS" in prompt

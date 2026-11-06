@@ -189,6 +189,8 @@ class TestCliDryRun:
             base_url="http://localhost:1234/v1",
             use_cache=True,
             temperature=0.7,
+            width=864,
+            height=1152,
         )
         mock_executor_cls.assert_not_called()
 

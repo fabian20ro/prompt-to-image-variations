@@ -1,8 +1,10 @@
 """Tracery wrapper for generating text from grammars."""
 
 import json
+import re
 import tracery
 from tracery.modifiers import base_english
+from grammar_generator import validate_grammar_structure
 
 
 class TraceryError(Exception):
@@ -24,8 +26,10 @@ def parse_grammar(grammar_json: str) -> dict:
         TraceryError: If JSON is invalid
     """
     try:
-        return json.loads(grammar_json)
-    except json.JSONDecodeError as e:
+        result = json.loads(grammar_json)
+        validate_grammar_structure(result, require_variation=False)
+        return result
+    except (json.JSONDecodeError, ValueError) as e:
         raise TraceryError(f"Invalid JSON grammar: {e}")
 
 
@@ -42,7 +46,12 @@ def generate_one(grammar_dict: dict, origin: str = "origin") -> str:
     """
     grammar = tracery.Grammar(grammar_dict)
     grammar.add_modifiers(base_english)
-    return grammar.flatten(f"#{origin}#")
+    text = grammar.flatten(f"#{origin}#")
+    # Rule fragments sometimes supply the same sentence-ending dot as origin.
+    # Preserve exact visible text inside quotes, including intentional punctuation.
+    parts = re.split(r'("(?:\\.|[^"\\])*"|“[^”]*”)', text)
+    return "".join(part if index % 2 else re.sub(r"(?<!\.)\.{2}(?!\.)", ".", part)
+                   for index, part in enumerate(parts))
 
 
 def run_tracery(grammar_json: str, count: int = 500, origin: str = "origin") -> list[str]:

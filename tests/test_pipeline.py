@@ -10,9 +10,6 @@ from conftest import create_run_files
 from pipeline import (
     PipelineExecutor,
     PipelineResult,
-    PipelineConfig,
-    ImageGenerationConfig,
-    EnhancementConfig,
 )
 
 
@@ -38,113 +35,6 @@ class TestPipelineResult:
         assert result.run_id is None
 
 
-class TestImageGenerationConfig:
-    """Tests for ImageGenerationConfig dataclass."""
-
-    def test_default_values(self):
-        """Test default configuration values."""
-        config = ImageGenerationConfig()
-        assert config.enabled is False
-        assert config.images_per_prompt == 1
-        assert config.width == 864
-        assert config.height == 1152
-        assert config.seed is None
-        assert config.tiled_vae is False
-        assert config.resume is False
-
-    def test_custom_values(self):
-        """Test custom configuration values."""
-        config = ImageGenerationConfig(
-            enabled=True,
-            width=1024,
-            height=1024,
-            seed=42,
-        )
-        assert config.enabled is True
-        assert config.width == 1024
-        assert config.seed == 42
-
-    def test_to_dict(self):
-        """Test conversion to dictionary."""
-        config = ImageGenerationConfig(
-            enabled=True,
-            width=1024,
-            height=768,
-        )
-        result = config.to_dict()
-        assert result["enabled"] is True
-        assert result["width"] == 1024
-        assert result["height"] == 768
-        # Optional fields should not be present if None
-        assert "seed" not in result or result.get("seed") is None
-        assert "max_prompts" not in result  # None by default
-
-    def test_to_dict_excludes_none_optionals(self):
-        """Test that None optional values are excluded from dict."""
-        config = ImageGenerationConfig()
-        result = config.to_dict()
-        assert "seed" not in result  # None by default
-        assert "max_prompts" not in result  # None by default
-
-
-class TestEnhancementConfig:
-    """Tests for EnhancementConfig dataclass."""
-
-    def test_default_values(self):
-        """Test default configuration values."""
-        config = EnhancementConfig()
-        assert config.enabled is False
-        assert config.softness == 0.5
-        assert config.batch_after is False
-
-    def test_custom_values(self):
-        """Test custom configuration values."""
-        config = EnhancementConfig(
-            enabled=True,
-            softness=0.3,
-            batch_after=True,
-        )
-        assert config.enabled is True
-        assert config.softness == 0.3
-        assert config.batch_after is True
-
-    def test_to_dict(self):
-        """Test conversion to dictionary."""
-        config = EnhancementConfig(enabled=True, softness=0.7)
-        result = config.to_dict()
-        assert result["enabled"] is True
-        assert result["softness"] == 0.7
-        assert result["batch_after"] is False
-
-
-class TestPipelineConfig:
-    """Tests for PipelineConfig dataclass."""
-
-    def test_default_values(self):
-        """Test default configuration values."""
-        config = PipelineConfig()
-        assert config.prompt == ""
-        assert config.count == 50
-        assert config.prefix == "image"
-        assert config.temperature == 0.7
-        assert config.no_cache is False
-        assert isinstance(config.image, ImageGenerationConfig)
-        assert isinstance(config.enhancement, EnhancementConfig)
-
-    def test_custom_values(self):
-        """Test custom configuration values."""
-        config = PipelineConfig(
-            prompt="a dragon flying",
-            count=100,
-            prefix="dragon",
-            image=ImageGenerationConfig(enabled=True, width=1024),
-            enhancement=EnhancementConfig(enabled=True),
-        )
-        assert config.prompt == "a dragon flying"
-        assert config.count == 100
-        assert config.image.enabled is True
-        assert config.image.width == 1024
-        assert config.enhancement.enabled is True
 
 class TestPipelineExecutorInit:
     """Tests for PipelineExecutor initialization."""

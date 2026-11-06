@@ -484,7 +484,7 @@ class TestGrammarEndpoints:
 
     def test_generate_from_grammar_valid(self, client, mock_queue_manager):
         """Test generating from a valid JSON grammar."""
-        grammar = '{"item": ["dragon", "unicorn"]}'
+        grammar = '{"origin": ["#item#"], "item": ["dragon", "unicorn"]}'
         response = client.post("/api/generate-from-grammar", json={
             "grammar": grammar,
             "count": 5

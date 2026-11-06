@@ -81,7 +81,7 @@ class TestModels:
         assert req.generate_images is False
         assert req.width == 864
         assert req.height == 1152
-        assert req.tiled_vae is False
+        assert req.enhance_tiled_vae is False
         assert req.enhance is False
 
     def test_generate_request_custom(self):

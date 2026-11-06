@@ -19,8 +19,8 @@ class TestConfig:
         assert settings.lm_studio.base_url == "http://localhost:1234/v1"
         assert settings.image_generation.default_width == 864
         assert settings.image_generation.default_height == 1152
-        assert settings.lm_studio.model == "google/gemma-4-26b-a4b-qat"
-        assert settings.image_generation.model_path.name == "ernie-image-turbo-4bit"
+        assert settings.lm_studio.model == "qwen3.8-27b-splash"
+        assert settings.image_generation.model_path.name == "flux3-klein-q4"
         assert settings.server.sse_queue_size == 100
         assert settings.enhancement.default_softness == 0.5
 

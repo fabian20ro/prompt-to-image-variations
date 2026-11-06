@@ -31,6 +31,14 @@ move it to the Archive section at the bottom with a date and reason.
 
 ## Code Patterns & Pitfalls
 
+**[2026-11-07]** Match Tracery escape semantics once — A backslash escapes the next character, including another backslash. Regexes that merely ignore delimiters preceded by a backslash can admit active actions or miss cycles. Share one escape-aware reference graph; protect quoted literals in one longest-match pass so repeated/already-escaped text is not escaped again. Public grammar/expansion regressions cover both.
+
+**[2026-11-07]** Validate before mutating run artifacts — Grammar regeneration must expand/validate before archiving or deleting PNGs. Creation cannot overwrite existing run captions while skipping existing images; resume through the saved-prompt path. Public-seam regression tests cover both.
+**[2026-11-07]** Preserve valid JSON before cleaning LLM wrappers — Curly apostrophes, literal `<think>` text, and backticks can be image content. Parse valid JSON before wrapper removal/quote repair, and extract valid prefixed JSON before normalizing delimiters.
+**[2026-11-07]** FLUX 3 mflux 0.24.0 decode uses built-in strips — Its old tiling setting does not control text-to-image decode. Keep the exposed tiling control specific to SeedVR2; do not cache two FLUX models by a meaningless boolean.
+
+**[2026-11-06]** Serialize layout arrays after Tracery expansion — Literal JSON arrays inside grammar strings are parsed as Tracery actions and disappear. Keep structured layout data separate and append serialized JSON after expanding text fields; verified with a FLUX bounding-box prompt.
+
 **[2026-02-07]** Validate model names before importing `mflux` - Importing `mflux` before rejecting unsupported models can trigger native MLX aborts in unsupported test paths.
 **[2026-02-07]** Keep docs and signatures aligned - Drift between documented defaults and implementation defaults (`tiled_vae`) causes repeated operator mistake
 **[2026-02-24]** Prefer MetadataManager for metadata operations — Direct JSON manipulation of run metadata bypasses validation and path logic; use MetadataManager consistently.s.
@@ -46,6 +54,8 @@ move it to the Archive section at the bottom with a date and reason.
 **[2026-05-14]** Click help output can wrap long option descriptions — when asserting `--help` text, prefer stable substrings over exact single-line matches for defaults embedded in long help strings.
 
 ## Performance & Infrastructure
+
+**[2026-11-07]** LM Studio unload is not an exclusive memory lease — Other CLI clients can reload a model during multi-minute image work. Verify native inventory at lifecycle boundaries and pause competing clients for hardware acceptance; do not weaken unload checks or kill unrelated clients to make tests pass. Two uninterrupted FLUX/SeedVR2 cycles passed after the competing reloads ceased.
 
 **[2026-02-07]** Open worker logs before long tasks - If log files are opened after pipeline execution starts, early progress information is permanently lost.
 

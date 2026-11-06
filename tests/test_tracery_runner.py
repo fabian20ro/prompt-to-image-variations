@@ -39,8 +39,8 @@ class TestParseGrammar:
 
     def test_parse_empty_grammar(self):
         """Test parsing empty JSON object."""
-        result = parse_grammar("{}")
-        assert result == {}
+        with pytest.raises(TraceryError, match="origin"):
+            parse_grammar("{}")
 
     def test_parse_invalid_json(self):
         """Test error on invalid JSON."""
@@ -181,7 +181,7 @@ class TestRunTracery:
     def test_run_tracery_complex_grammar(self):
         """Test with a more complex grammar."""
         grammar_json = json.dumps({
-            "origin": ["#mood.a# #animal# in #setting.a#"],
+            "origin": ["A #mood# #animal# in a #setting#"],
             "mood": ["happy", "sad", "curious"],
             "animal": ["cat", "dog", "bird"],
             "setting": ["garden", "forest", "city"],

@@ -29,14 +29,14 @@ def _get_env_float(key: str, default: float) -> float:
 class LMStudioConfig:
     """Configuration for LM Studio connection."""
     base_url: str = "http://localhost:1234/v1"
-    model: str = "google/gemma-4-26b-a4b-qat"
+    model: str = "qwen3.8-27b-splash"
 
 @dataclass(frozen=True)
 class ImageGenerationConfig:
     """Default configuration for image generation."""
     default_width: int = 864
     default_height: int = 1152
-    model_path: Path = Path.home() / "Library/Caches/mflux/models/ernie-image-turbo-4bit"
+    model_path: Path = Path.home() / "Library/Caches/mflux/models/flux3-klein-q4"
 
 @dataclass(frozen=True)
 class ServerConfig:
@@ -117,7 +117,7 @@ class Settings:
             default_width=_get_env_int("PROMPT_GEN_DEFAULT_WIDTH", ImageGenerationConfig.default_width),
             default_height=_get_env_int("PROMPT_GEN_DEFAULT_HEIGHT", ImageGenerationConfig.default_height),
             model_path=Path(os.environ.get(
-                "PROMPT_GEN_ERNIE_MODEL_PATH",
+                "PROMPT_GEN_IMAGE_MODEL_PATH",
                 str(ImageGenerationConfig.model_path),
             )),
         )

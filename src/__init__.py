@@ -1,1 +1,1 @@
-"""ERNIE-Image-Turbo prompt generator using local LLM-powered Tracery grammars."""
+"""FLUX 3 Image Klein prompt generator using local LLM-powered Tracery grammars."""

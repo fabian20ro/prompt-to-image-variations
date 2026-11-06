@@ -1,4 +1,5 @@
 import unittest
+import json
 import sys
 from pathlib import Path
 
@@ -105,7 +106,7 @@ class TestGrammarTools(unittest.TestCase):
         result = get_system_prompt()
         self.assertEqual(result, "system prompt content")
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.get")
     @patch("grammar_generator.requests.post")
     def test_generate_grammar_uses_native_chat_without_reasoning(
@@ -114,8 +115,8 @@ class TestGrammarTools(unittest.TestCase):
         mock_get.return_value.json.return_value = {
             "models": [
                 {
-                    "key": "google/gemma-4-26b-a4b-qat",
-                    "loaded_instances": [{"id": "google/gemma-4-26b-a4b-qat"}],
+                    "key": "qwen3.8-27b-splash",
+                    "loaded_instances": [{"id": "qwen3.8-27b-splash"}],
                 }
             ]
         }
@@ -133,15 +134,15 @@ class TestGrammarTools(unittest.TestCase):
             use_cache=False,
         )
 
-        assert grammar == grammar_json
-        assert raw == grammar
+        assert json.loads(grammar) == json.loads(grammar_json)
+        assert raw == grammar_json
         assert was_cached is False
         mock_post.assert_called_once_with(
             "http://localhost:1234/api/v1/chat",
             json={
-                "model": "google/gemma-4-26b-a4b-qat",
-                "input": "a cat",
-                "system_prompt": "ERNIE instructions",
+                "model": "qwen3.8-27b-splash",
+                "input": "TARGET CANVAS: 864:1152\na cat",
+                "system_prompt": "FLUX instructions",
                 "temperature": 0.7,
                 "max_output_tokens": 4096,
                 "reasoning": "off",
@@ -158,7 +159,7 @@ class TestGrammarTools(unittest.TestCase):
     def test_ensure_lm_model_loaded_waits_for_native_load(self, mock_post, mock_get):
         mock_get.return_value.json.return_value = {
             "models": [
-                {"key": "google/gemma-4-26b-a4b-qat", "loaded_instances": []}
+                {"key": "qwen3.8-27b-splash", "loaded_instances": []}
             ]
         }
         mock_post.return_value.json.return_value = {"status": "loaded"}
@@ -167,7 +168,7 @@ class TestGrammarTools(unittest.TestCase):
 
         mock_post.assert_called_once_with(
             "http://localhost:1234/api/v1/models/load",
-            json={"model": "google/gemma-4-26b-a4b-qat", "context_length": 8192},
+            json={"model": "qwen3.8-27b-splash", "context_length": 8192},
             timeout=180.0,
         )
         mock_post.return_value.raise_for_status.assert_called_once_with()
@@ -182,11 +183,13 @@ class TestGrammarTools(unittest.TestCase):
 
         mock_get.return_value.json.return_value = {
             "models": [
-                {"key": "google/gemma-4-26b-a4b-qat", "loaded_instances": []}
+                {"key": "qwen3.8-27b-splash", "loaded_instances": []}
             ]
         }
         failed = MagicMock()
-        failed.raise_for_status.side_effect = requests.HTTPError("load canceled")
+        error_response = requests.Response()
+        error_response.status_code = 409
+        failed.raise_for_status.side_effect = requests.HTTPError("load canceled", response=error_response)
         loaded = MagicMock()
         loaded.json.return_value = {"status": "loaded"}
         mock_post.side_effect = [failed, loaded]

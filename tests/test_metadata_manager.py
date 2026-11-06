@@ -42,7 +42,7 @@ class TestRunMetadata:
 
         assert metadata.prefix == "image"
         assert metadata.count == 0
-        assert metadata.model == "ernie-image-turbo"
+        assert metadata.model == "unknown"
 
     def test_run_metadata_invalid_count(self):
         """Test that negative count raises ValueError."""

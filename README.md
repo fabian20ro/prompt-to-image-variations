@@ -1,19 +1,19 @@
-# ERNIE Image Prompt Expander
+# FLUX 3 Image Prompt Expander
 
-Local procedural prompt generation and image rendering for ERNIE-Image-Turbo on Apple Silicon.
+Local procedural prompt generation and image rendering for FLUX 3 Image Klein on Apple Silicon.
 
-The application asks a local Gemma model in LM Studio to create an ERNIE-oriented Tracery grammar, expands that grammar into prompt variations, and optionally renders them with a persistent 4-bit ERNIE-Image-Turbo checkpoint through mflux. SeedVR2 2× enhancement is available as a second local stage.
+The application asks a local Qwen model in LM Studio to create a FLUX-oriented Tracery grammar, expands that grammar into prompt variations, and optionally renders them with a persistent 4-bit FLUX 3 Image Klein checkpoint through mflux. SeedVR2 2× enhancement is available as a second local stage.
 
 No paid or hosted inference API is used.
 
 ## Requirements
 
 - macOS on Apple Silicon
-- Python 3.10+
+- Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
-- LM Studio with `google/gemma-4-26b-a4b-qat`
+- LM Studio with `qwen3.8-27b-splash`
 - LM Studio CLI (`lms`) on `PATH`
-- Enough free disk space to download the source checkpoint and save the approximately 6.2 GB q4 checkpoint
+- Enough free disk space to download the source checkpoint and save the approximately 5 GB q4 checkpoint
 
 ## Installation
 
@@ -25,50 +25,52 @@ uv sync --extra images --group dev
 Start the LM Studio local server at `http://localhost:1234/v1`. The configured model ID is:
 
 ```text
-google/gemma-4-26b-a4b-qat
+qwen3.8-27b-splash
 ```
 
 Override it when necessary:
 
 ```bash
-export PROMPT_GEN_LM_STUDIO_MODEL=google/gemma-4-26b-a4b-qat
+export PROMPT_GEN_LM_STUDIO_MODEL=qwen3.8-27b-splash
 ```
 
-## Provision ERNIE-Image-Turbo q4
+## Provision FLUX 3 Image Klein q4
 
 The application intentionally loads only a previously saved 4-bit checkpoint. Default location:
 
 ```text
-~/Library/Caches/mflux/models/ernie-image-turbo-4bit
+~/Library/Caches/mflux/models/flux3-klein-q4
 ```
 
-Create it once with mflux 0.18.0 or newer:
+Accept access terms for [the distilled model](https://huggingface.co/black-forest-labs/flux-3-image-klein), then log in locally. Never share the token in chat. Create the checkpoint once with mflux 0.24.0:
 
 ```bash
 mkdir -p ~/Library/Caches/mflux/models
+uv run hf auth login
+lms unload --all
 uv run mflux-save \
-  --model ernie-image-turbo \
+  --model flux3-image-klein \
   --quantize 4 \
-  --path ~/Library/Caches/mflux/models/ernie-image-turbo-4bit
+  --path ~/Library/Caches/mflux/models/flux3-klein-q4
 ```
 
 Custom location:
 
 ```bash
-export PROMPT_GEN_ERNIE_MODEL_PATH=/absolute/path/to/ernie-image-turbo-4bit
+export PROMPT_GEN_IMAGE_MODEL_PATH=/absolute/path/to/flux3-klein-q4
 ```
 
 After verifying generation, the larger source checkpoint in the Hugging Face cache may be removed manually. Do not remove the saved q4 directory.
 
 ## Memory handoff
 
-Grammar inference and image inference do not coexist in unified memory. Immediately before loading ERNIE or SeedVR2, the application runs:
+Grammar inference and image inference do not coexist in unified memory. Immediately before loading FLUX 3 or SeedVR2, the application runs:
 
 ```bash
 lms unload --all
 ```
 
-Image generation fails closed if the CLI is missing, times out, or cannot unload the models. Before a later grammar request, the application checks LM Studio's native model inventory and synchronously reloads Gemma by its exact model ID. Transient load cancellations are retried three times.
+Image generation fails closed if the CLI is missing, times out, or cannot unload the models. FLUX is released before SeedVR2; image models are released before Qwen. Before an uncached grammar request, the application checks LM Studio's native model inventory and synchronously reloads Qwen by its exact model ID with an 8192-token context. Transient load failures have at most three attempts; invalid configuration is not retried.
 
 ## CLI
 
@@ -80,7 +82,7 @@ uv run python src/cli.py \
   --count 20
 ```
 
-Generate prompts and ERNIE images:
+Generate prompts and FLUX 3 images:
 
 ```bash
 uv run python src/cli.py \
@@ -126,17 +128,17 @@ Important options:
 | `--count INT` | Number of Tracery expansions |
 | `--generate-images` | Render expanded prompts |
 | `--images-per-prompt INT` | Images per prompt; `0` keeps a prompt-only layout |
-| `--width`, `--height` | Output dimensions; multiples of 8 |
+| `--width`, `--height` | Output dimensions; multiples of 16 |
 | `--seed INT` | Reproducible starting seed |
 | `--max-prompts INT` | Limit prompts rendered as images |
-| `--no-tiled-vae` | Disable memory-saving VAE tiling |
+| `--no-enhance-tiled-vae` | Disable SeedVR2 tiling; FLUX uses its built-in strip decoder |
 | `--enhance` | Apply SeedVR2 2× enhancement |
 | `--enhance-softness FLOAT` | SeedVR2 softness from 0 to 1 |
-| `--enhance-after` | Release ERNIE before batch enhancement |
+| `--enhance-after` | Release FLUX 3 before batch enhancement |
 | `--dry-run` | Print grammar without rendering |
 | `--serve` | Start the web UI |
 
-Model architecture, quantization, inference steps, and guidance are deliberately not configurable. Generation always uses ERNIE-Image-Turbo q4, 8 inference steps, and guidance 1.0.
+Model architecture, quantization, inference steps, and guidance are deliberately not configurable. Generation always uses distilled FLUX 3 Image Klein q4, 16 inference steps, and no CFG. Dimensions must be 64–4096, divisible by 16. Legacy/unknown-model runs cannot be rendered in place; import their grammar into a new run instead. Historical galleries remain readable.
 
 ## Web UI
 
@@ -157,16 +159,15 @@ Open `http://localhost:8000`. The UI provides:
 
 ## Prompt format
 
-Gemma returns strict Tracery JSON. Expanded ERNIE prompts follow:
+Qwen returns strict Tracery JSON. Each expansion is a complete continuous caption, following [BFL's guide](https://docs.bfl.ai/guides/prompting_unified_building) and [upsampler instructions](https://huggingface.co/black-forest-labs/flux-3-image-klein-pup/blob/main/system_prompts.json):
 
-1. exact subject
-2. concrete description, visible details, and spatial relationships
-3. one clear style and medium
-4. technical/capture finish: composition, viewpoint, lighting, palette, focus, texture
+1. Medium/style first; explicit user constraints stay fixed.
+2. Coherent scene, lighting and framing, then concrete subject details and spatial relationships.
+3. Exact quoted visible wording; no quality-tag padding. Typically 100–350 words, shorter for simple subjects.
 
-Structured posters, infographics, interfaces, and comics lead with their overall layout. Each varying Tracery rule normally contains seven distinct alternatives; five or six are accepted when additional choices would reduce quality. Rules with two to four alternatives are rejected.
+Structured posters, infographics, interfaces, and comics describe reading order and text placement in prose. Target canvas is provided to Qwen. Each generated varying rule targets seven distinct alternatives, with five as the minimum. Fixed rules may have one. Imported grammars may use fewer choices. Modifiers, actions, missing references, and cycles are rejected; literal `#`, `[` and `]` must be escaped with a backslash (doubled in JSON). Structured bounding-box layouts are not implemented.
 
-Visible text is instantiated rather than represented by placeholders. User-provided text remains exact and quoted. Grammar cache keys include the ERNIE prompt-schema version, preventing reuse of obsolete prompt formats.
+Cache keys include schema, template contents, prompt model, canvas, temperature and input. Cache hits are revalidated. Invalid fresh output receives one repair attempt before a clear error. The example in `templates/system_prompt.txt` keeps its headline and medium fixed, with seven coherent alternatives per variable.
 
 ## Output
 
@@ -183,12 +184,14 @@ Generation metadata always records:
 
 ```json
 {
-  "model": "ernie-image-turbo",
-  "steps": 8,
-  "guidance": 1.0,
+  "model": "flux3-image-klein",
+  "steps": 16,
+  "guidance": null,
   "quantize": 4
 }
 ```
+
+Run metadata also records the checkpoint path, mflux version, distilled variant, prompt schema/model, and source revision when a checkpoint provenance manifest is available (otherwise `null`, never guessed). Each rendered PNG has a `.generation.json` sidecar with its actual seed, exact caption and original dimensions. Enhancement leaves that generation record intact.
 
 ## Verification
 
@@ -199,22 +202,31 @@ uv run pytest -q
 
 Tests mock LM Studio and mflux. Hardware smoke tests require the provisioned checkpoint and working Metal access.
 
+```bash
+uv run python scripts/verify_flux3.py --mode corpus
+uv run python scripts/verify_flux3.py --mode e2e
+```
+
+The corpus generates 12 requests twice; inspect its saved samples for semantic coherence. E2E runs two uncached Qwen → FLUX q4 → SeedVR2 cycles at 864×1152, recording dimensions, memory and LM Studio state. Outputs are in `generated/verification/`. These checks are opt-in and use local inference. Worker heartbeats keep long tasks observable; the worker timeout is a liveness check, not a five-minute generation deadline.
+
+Measured results and remaining acceptance limits: [verification report](docs/flux3-verification.md).
+
 ## Troubleshooting
 
 **LM Studio unreachable** — Start its local server and ensure the base URL is `http://localhost:1234/v1`.
 
-**Gemma not available** — Install/load `google/gemma-4-26b-a4b-qat`. Confirm with `lms ps`.
+**Qwen not available** — Install/load `qwen3.8-27b-splash`. Confirm with `lms ps`.
 
 **Image generation refuses to start** — Confirm `lms` is on `PATH` and `lms unload --all` succeeds.
 
-**ERNIE checkpoint missing** — Run the q4 provisioning command or set `PROMPT_GEN_ERNIE_MODEL_PATH`.
+**FLUX 3 checkpoint missing** — Run the q4 provisioning command or set `PROMPT_GEN_IMAGE_MODEL_PATH`.
 
-**Out of memory** — Use tiled VAE, reduce dimensions, and enable deferred enhancement.
+**Out of memory** — Reduce dimensions and enable deferred enhancement. SeedVR2 tiling affects enhancement only.
 
 **Invalid grammar JSON** — Retry with `--no-cache`; inspect the cached raw LM response.
 
 ## Credits
 
-- [ERNIE-Image](https://github.com/baidu/ERNIE-Image) by Baidu
+- [FLUX 3 Image Klein](https://huggingface.co/black-forest-labs/flux-3-image-klein) by Black Forest Labs
 - [mflux](https://github.com/filipstrand/mflux) by Filip Strand
 - [Tracery](https://github.com/galaxykate/tracery)

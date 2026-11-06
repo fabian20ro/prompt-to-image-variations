@@ -1,6 +1,8 @@
 """SeedVR2 image enhancement using mflux (MLX-based for Apple Silicon)."""
 
 import random
+import sys
+import gc
 from pathlib import Path
 
 from lm_studio import unload_all_models
@@ -14,8 +16,9 @@ def clear_enhancer_cache():
     """Clear the enhancer cache and free memory."""
     global _enhancer_cache
     _enhancer_cache.clear()
-    import gc
     gc.collect()
+    if mx := sys.modules.get("mlx.core"):
+        mx.clear_cache()
 
 
 def _get_enhancer(tiled_vae: bool = False):
@@ -23,6 +26,7 @@ def _get_enhancer(tiled_vae: bool = False):
     cache_key = tiled_vae
     if cache_key in _enhancer_cache:
         return _enhancer_cache[cache_key]
+    clear_enhancer_cache()
 
     try:
         from mflux.models.seedvr2.variants.upscale.seedvr2 import SeedVR2
@@ -73,6 +77,8 @@ def enhance_image(
     if not (0.0 <= softness <= 1.0):
         raise ValueError("softness must be between 0.0 and 1.0")
 
+    from image_generator import clear_model_cache
+    clear_model_cache()
 
     # Import ScaleFactor for 2x upscaling
     try:

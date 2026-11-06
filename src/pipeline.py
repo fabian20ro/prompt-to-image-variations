@@ -14,15 +14,14 @@ from typing import Callable, Protocol
 logger = logging.getLogger(__name__)
 
 from config import paths, settings
-from grammar_generator import generate_grammar, hash_prompt
+from grammar_generator import generate_grammar, hash_prompt, PROMPT_SCHEMA_VERSION
 from tracery_runner import run_tracery, TraceryError
 from image_generator import (
-    GUIDANCE,
-    INFERENCE_STEPS,
     MODEL_NAME,
-    QUANTIZATION,
+    generation_settings,
     clear_model_cache,
     generate_image,
+    validate_dimensions,
 )
 from image_enhancer import enhance_image
 from gallery import create_gallery, update_gallery
@@ -85,89 +84,24 @@ class PipelineResult:
     data: dict = field(default_factory=dict)
 
 
-@dataclass
-class ImageGenerationConfig:
-    """Configuration for image generation settings.
-
-    Groups all image-related parameters to reduce function signature complexity.
-    """
-
-    enabled: bool = False
-    images_per_prompt: int = 1
-    width: int = 864
-    height: int = 1152
-    seed: int | None = None
-    max_prompts: int | None = None  # Limit prompts to render
-    tiled_vae: bool = False
-    resume: bool = False  # Skip existing images
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for metadata storage."""
-        result = {
-            "enabled": self.enabled,
-            "images_per_prompt": self.images_per_prompt,
-            "width": self.width,
-            "height": self.height,
-            "tiled_vae": self.tiled_vae,
-        }
-        if self.seed is not None:
-            result["seed"] = self.seed
-        if self.max_prompts is not None:
-            result["max_prompts"] = self.max_prompts
-        return result
+def _legacy_run_error(directory: Path | None, creating: bool = False) -> PipelineResult | None:
+    if directory is None or not directory.exists():
+        return None
+    if creating and any(file.suffix != ".log" for file in directory.iterdir()):
+        return PipelineResult(success=False, error="Output directory already contains artifacts. Choose a new run; resume existing images via --from-prompts.")
+    try:
+        meta = MetadataManager.load(directory)
+    except MetadataNotFoundError:
+        if not any(file.suffix != ".log" for file in directory.iterdir()):
+            return None
+        model = None
+    else:
+        model = meta.image_generation.get("model", meta.model)
+    if model != MODEL_NAME:
+        return PipelineResult(success=False, error="Incompatible or unknown image model. Import the grammar into a new run.")
+    return None
 
 
-@dataclass
-class EnhancementConfig:
-    """Configuration for image enhancement settings."""
-
-    enabled: bool = False
-    softness: float = 0.5
-    batch_after: bool = False  # Enhance all images after generation completes
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for metadata storage."""
-        return {
-            "enabled": self.enabled,
-            "softness": self.softness,
-            "batch_after": self.batch_after,
-        }
-
-
-@dataclass
-class PipelineConfig:
-    """Complete configuration for pipeline execution.
-
-    This class groups all pipeline parameters into logical categories,
-    reducing function signature complexity from 20+ parameters to a single config.
-
-    Example:
-        config = PipelineConfig(
-            prompt="a dragon flying",
-            count=50,
-            image=ImageGenerationConfig(enabled=True, width=1024, height=1024),
-            enhancement=EnhancementConfig(enabled=True, softness=0.3),
-        )
-        result = executor.run_with_config(config)
-    """
-
-    # Required
-    prompt: str = ""
-
-    # Grammar/Prompt settings
-    count: int = 50
-    prefix: str = "image"
-    temperature: float = 0.7
-    no_cache: bool = False
-
-    # Image generation settings
-    image: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
-
-    # Enhancement settings
-    enhancement: EnhancementConfig = field(default_factory=EnhancementConfig)
-
-    # Output settings
-    output_dir: Path | None = None
 
 def _null_progress(stage: str, current: int = 0, total: int = 0, message: str = "") -> None:
     """No-op progress callback."""
@@ -209,12 +143,13 @@ class PipelineExecutor:
         height: int = 1152,
         seed: int | None = None,
         max_prompts: int | None = None,
-        tiled_vae: bool = True,
+        enhance_tiled_vae: bool = True,
         enhance: bool = False,
         enhance_softness: float = 0.5,
         enhance_after: bool = False,
         resume: bool = False,
         output_dir: Path | None = None,
+        base_url: str = settings.lm_studio.base_url,
     ) -> PipelineResult:
         """Run the full generation pipeline: LLM -> Tracery -> Images.
 
@@ -230,7 +165,7 @@ class PipelineExecutor:
             height: Image height
             seed: Random seed
             max_prompts: Limit prompts to render
-            tiled_vae: Use tiled VAE decoding
+            enhance_tiled_vae: Use tiled VAE decoding
             enhance: Enable SeedVR2 enhancement
             enhance_softness: Enhancement softness
             enhance_after: Batch enhancement after all images
@@ -240,7 +175,13 @@ class PipelineExecutor:
         Returns:
             PipelineResult with operation results
         """
+        if error := _legacy_run_error(output_dir, creating=True):
+            return error
         # Stage 1: Generate grammar
+        try:
+            validate_dimensions(width, height)
+        except ValueError as exc:
+            return PipelineResult(success=False, error=str(exc))
         cache_msg = " (ignoring cache)" if no_cache else ""
         self.on_progress(
             "generating_grammar", 0, 1,
@@ -252,6 +193,9 @@ class PipelineExecutor:
                 user_prompt=prompt,
                 use_cache=not no_cache,
                 temperature=temperature,
+                width=width,
+                height=height,
+                base_url=base_url,
             )
         except Exception as e:
             return PipelineResult(success=False, error=f"Grammar generation failed: {e}")
@@ -270,7 +214,7 @@ class PipelineExecutor:
 
         # Create output directory
         if output_dir is None:
-            prompt_hash = hash_prompt(prompt)
+            prompt_hash = hash_prompt(prompt, width, height, temperature)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_dir = paths.prompts_dir / f"{timestamp}_{prompt_hash}"
 
@@ -290,6 +234,8 @@ class PipelineExecutor:
             "grammar_cached": was_cached,
             "prefix": prefix,
             "model": MODEL_NAME,
+            "prompt_model": settings.lm_studio.model,
+            "prompt_schema": PROMPT_SCHEMA_VERSION,
             "display_title": prompt,
             "gallery_layout": {
                 "images_per_prompt": images_per_prompt,
@@ -297,21 +243,18 @@ class PipelineExecutor:
             },
         }
 
-        if generate_images:
-            metadata["image_generation"] = {
-                "enabled": True,
-                "model": MODEL_NAME,
-                "steps": INFERENCE_STEPS,
-                "guidance": GUIDANCE,
-                "width": width,
-                "height": height,
-                "quantize": QUANTIZATION,
-                "images_per_prompt": images_per_prompt,
-                "max_prompts": max_prompts,
-                "seed": seed,
-                "enhance": enhance,
-                "enhance_softness": enhance_softness if enhance else None,
-            }
+        metadata["image_generation"] = {
+            "enabled": generate_images,
+            **generation_settings(),
+            "width": width,
+            "height": height,
+            "images_per_prompt": images_per_prompt,
+            "max_prompts": max_prompts,
+            "seed": seed,
+            "enhance": enhance,
+            "enhance_softness": enhance_softness if enhance else None,
+            "enhance_tiled_vae": enhance_tiled_vae,
+        }
 
         # Save metadata and grammar
         metadata_file = output_dir / f"{prefix}.metaprompt.json"
@@ -354,7 +297,7 @@ class PipelineExecutor:
                 width=width,
                 height=height,
                 seed=seed,
-                tiled_vae=tiled_vae,
+                enhance_tiled_vae=enhance_tiled_vae,
                 enhance=enhance,
                 enhance_softness=enhance_softness,
                 enhance_after=enhance_after,
@@ -386,7 +329,7 @@ class PipelineExecutor:
         height: int = 1152,
         seed: int | None = None,
         max_prompts: int | None = None,
-        tiled_vae: bool = True,
+        enhance_tiled_vae: bool = True,
         enhance: bool = False,
         enhance_softness: float = 0.5,
         enhance_after: bool = False,
@@ -405,7 +348,7 @@ class PipelineExecutor:
             height: Image height
             seed: Random seed
             max_prompts: Limit prompts to render
-            tiled_vae: Use tiled VAE
+            enhance_tiled_vae: Use tiled VAE
             enhance: Enable enhancement
             enhance_softness: Enhancement softness
             enhance_after: Batch enhancement
@@ -456,7 +399,7 @@ class PipelineExecutor:
             height=height,
             seed=seed,
             max_prompts=max_prompts,
-            tiled_vae=tiled_vae,
+            enhance_tiled_vae=enhance_tiled_vae,
             enhance=enhance,
             enhance_softness=enhance_softness,
             enhance_after=enhance_after,
@@ -480,7 +423,7 @@ class PipelineExecutor:
         height: int = 1152,
         seed: int | None = None,
         max_prompts: int | None = None,
-        tiled_vae: bool = True,
+        enhance_tiled_vae: bool = True,
         enhance: bool = False,
         enhance_softness: float = 0.5,
         enhance_after: bool = False,
@@ -493,6 +436,14 @@ class PipelineExecutor:
         display_title: str | None = None,
     ) -> PipelineResult:
         """Run pipeline from grammar text without requiring a source file."""
+
+        try:
+            validate_dimensions(width, height)
+        except ValueError as exc:
+            return PipelineResult(success=False, error=str(exc))
+
+        if error := _legacy_run_error(output_dir, creating=True):
+            return error
 
         # Run Tracery
         self.on_progress("expanding_prompts", 0, count, f"Expanding {count} prompts...")
@@ -524,6 +475,8 @@ class PipelineExecutor:
         # Build metadata
         metadata = {
             "source": source,
+            "prompt_model": None,
+            "prompt_schema": PROMPT_SCHEMA_VERSION,
             "user_prompt": user_prompt,
             "count": len(outputs),
             "created_at": datetime.now().isoformat(),
@@ -541,18 +494,15 @@ class PipelineExecutor:
 
         metadata["image_generation"] = {
             "enabled": generate_images,
-            "model": MODEL_NAME,
-            "steps": INFERENCE_STEPS,
-            "guidance": GUIDANCE,
+            **generation_settings(),
             "width": width,
             "height": height,
-            "quantize": QUANTIZATION,
             "images_per_prompt": images_per_prompt,
             "max_prompts": max_prompts,
             "seed": seed,
             "enhance": enhance,
             "enhance_softness": enhance_softness if enhance else None,
-            "tiled_vae": tiled_vae,
+            "enhance_tiled_vae": enhance_tiled_vae,
         }
 
         # Save metadata and grammar
@@ -596,7 +546,7 @@ class PipelineExecutor:
                 width=width,
                 height=height,
                 seed=seed,
-                tiled_vae=tiled_vae,
+                enhance_tiled_vae=enhance_tiled_vae,
                 enhance=enhance,
                 enhance_softness=enhance_softness,
                 enhance_after=enhance_after,
@@ -625,7 +575,7 @@ class PipelineExecutor:
         height: int | None = None,
         seed: int | None = None,
         max_prompts: int | None = None,
-        tiled_vae: bool = True,
+        enhance_tiled_vae: bool = True,
         enhance: bool = False,
         enhance_softness: float = 0.5,
         enhance_after: bool = False,
@@ -640,7 +590,7 @@ class PipelineExecutor:
             height: Image height (uses metadata default if None)
             seed: Random seed
             max_prompts: Limit prompts to render
-            tiled_vae: Use tiled VAE
+            enhance_tiled_vae: Use tiled VAE
             enhance: Enable enhancement
             enhance_softness: Enhancement softness
             enhance_after: Batch enhancement
@@ -649,6 +599,8 @@ class PipelineExecutor:
         Returns:
             PipelineResult with operation results
         """
+        if error := _legacy_run_error(prompts_dir):
+            return error
         # Load metadata
         try:
             meta = MetadataManager.load(prompts_dir)
@@ -661,6 +613,11 @@ class PipelineExecutor:
         # Use existing settings as defaults
         width = width or existing_settings.get("width", 864)
         height = height or existing_settings.get("height", 1152)
+        seed = seed if seed is not None else existing_settings.get("seed")
+        try:
+            validate_dimensions(width, height)
+        except ValueError as exc:
+            return PipelineResult(success=False, error=str(exc))
 
         # Load prompts
         prompt_files = sorted(prompts_dir.glob(f"{prefix}_*.txt"))
@@ -677,12 +634,9 @@ class PipelineExecutor:
         # Update metadata
         new_image_settings = {
             "enabled": True,
-            "model": MODEL_NAME,
-            "steps": INFERENCE_STEPS,
-            "guidance": GUIDANCE,
+            **generation_settings(),
             "width": width,
             "height": height,
-            "quantize": QUANTIZATION,
             "images_per_prompt": images_per_prompt,
             "max_prompts": max_prompts,
             "seed": seed,
@@ -690,7 +644,7 @@ class PipelineExecutor:
             "original_settings": existing_settings if existing_settings else None,
             "enhance": enhance,
             "enhance_softness": enhance_softness if enhance else None,
-            "tiled_vae": tiled_vae,
+            "enhance_tiled_vae": enhance_tiled_vae,
         }
         MetadataManager.update(
             prompts_dir,
@@ -730,7 +684,7 @@ class PipelineExecutor:
             width=width,
             height=height,
             seed=seed,
-            tiled_vae=tiled_vae,
+            enhance_tiled_vae=enhance_tiled_vae,
             enhance=enhance,
             enhance_softness=enhance_softness,
             enhance_after=enhance_after,
@@ -782,6 +736,12 @@ class PipelineExecutor:
         if max_prompts is None:
             max_prompts = resolved_layout["max_prompts"]
 
+        # Validate and expand before any destructive update or backup.
+        try:
+            outputs = run_tracery(grammar, count=count)
+        except TraceryError as e:
+            return PipelineResult(success=False, error=f"Tracery expansion failed: {e}")
+
         # Create backup if there are images
         if run_has_images(output_dir):
             self.on_progress("backup", 0, 1, "Creating backup before regenerating...")
@@ -797,11 +757,6 @@ class PipelineExecutor:
                 image_file.unlink(missing_ok=True)
 
         self.on_progress("expanding_prompts", 0, count, f"Regenerating {count} prompts...")
-
-        try:
-            outputs = run_tracery(grammar, count=count)
-        except TraceryError as e:
-            return PipelineResult(success=False, error=f"Tracery expansion failed: {e}")
 
         # Delete old prompt files
         for old_file in output_dir.glob(f"{prefix}_*.txt"):
@@ -875,6 +830,9 @@ class PipelineExecutor:
         """
         output_dir = paths.prompts_dir / run_id
 
+        if error := _legacy_run_error(output_dir):
+            return error
+
         if not output_dir.exists():
             return PipelineResult(success=False, error=f"Run directory not found: {run_id}")
 
@@ -894,6 +852,12 @@ class PipelineExecutor:
 
         prompt_text = prompt_file.read_text()
         output_path = output_dir / f"{prefix}_{prompt_idx}_{image_idx}.png"
+        seed = image_settings.get("seed")
+        if seed is not None:
+            seed += prompt_idx * image_settings.get("images_per_prompt", 1) + image_idx
+        sidecar = output_path.with_suffix(".generation.json")
+        if sidecar.exists():
+            seed = json.loads(sidecar.read_text()).get("seed", seed)
 
         self.on_progress("generating_image", 0, 1, f"Generating {output_path.name}...")
 
@@ -901,10 +865,9 @@ class PipelineExecutor:
             generate_image(
                 prompt=prompt_text,
                 output_path=output_path,
-                seed=image_settings.get("seed"),
+                seed=seed,
                 width=image_settings.get("width", 864),
                 height=image_settings.get("height", 1152),
-                tiled_vae=image_settings.get("tiled_vae", True),
             )
         except Exception as e:
             return PipelineResult(success=False, error=f"Image generation failed: {e}")
@@ -963,7 +926,7 @@ class PipelineExecutor:
                 image_path=image_path,
                 output_path=image_path,
                 softness=softness,
-                tiled_vae=image_settings.get("tiled_vae", True),
+                tiled_vae=image_settings.get("enhance_tiled_vae", True),
             )
         except Exception as e:
             return PipelineResult(success=False, error=f"Enhancement failed: {e}")
@@ -1009,6 +972,9 @@ class PipelineExecutor:
         """
         output_dir = paths.prompts_dir / run_id
 
+        if error := _legacy_run_error(output_dir):
+            return error
+
         if not output_dir.exists():
             return PipelineResult(success=False, error=f"Run directory not found: {run_id}")
 
@@ -1025,8 +991,12 @@ class PipelineExecutor:
         # Use passed settings or fall back to metadata defaults
         effective_width = width or image_settings.get("width", 864)
         effective_height = height or image_settings.get("height", 1152)
+        try:
+            validate_dimensions(effective_width, effective_height)
+        except ValueError as exc:
+            return PipelineResult(success=False, error=str(exc))
         effective_seed = seed if seed is not None else image_settings.get("seed")
-        effective_tiled_vae = image_settings.get("tiled_vae", True)
+        effective_enhance_tiled_vae = image_settings.get("enhance_tiled_vae", True)
 
         # Load prompts
         prompt_files = sorted(output_dir.glob(f"{prefix}_*.txt"))
@@ -1047,18 +1017,15 @@ class PipelineExecutor:
         # Update metadata with effective settings
         new_image_settings = {
             "enabled": True,
-            "model": MODEL_NAME,
+            **generation_settings(),
             "width": effective_width,
             "height": effective_height,
-            "steps": INFERENCE_STEPS,
-            "guidance": GUIDANCE,
-            "quantize": QUANTIZATION,
             "seed": effective_seed,
             "images_per_prompt": images_per_prompt,
             "max_prompts": max_prompts,
             "enhance": enhance,
             "enhance_softness": enhance_softness if enhance else None,
-            "tiled_vae": effective_tiled_vae,
+            "enhance_tiled_vae": effective_enhance_tiled_vae,
         }
         MetadataManager.update(
             output_dir,
@@ -1107,7 +1074,7 @@ class PipelineExecutor:
             width=effective_width,
             height=effective_height,
             seed=effective_seed,
-            tiled_vae=effective_tiled_vae,
+            enhance_tiled_vae=effective_enhance_tiled_vae,
             enhance=enhance,
             enhance_softness=enhance_softness,
             enhance_after=True,  # Always batch enhance in generate_all_images
@@ -1175,7 +1142,7 @@ class PipelineExecutor:
                     image_path=image_path,
                     output_path=image_path,
                     softness=softness,
-                    tiled_vae=image_settings.get("tiled_vae", True),
+                    tiled_vae=image_settings.get("enhance_tiled_vae", True),
                 )
             except Exception as e:
                 return PipelineResult(
@@ -1202,7 +1169,7 @@ class PipelineExecutor:
         width: int,
         height: int,
         seed: int | None,
-        tiled_vae: bool,
+        enhance_tiled_vae: bool,
         enhance: bool,
         enhance_softness: float,
         enhance_after: bool,
@@ -1244,7 +1211,6 @@ class PipelineExecutor:
                         seed=current_seed,
                         width=width,
                         height=height,
-                        tiled_vae=tiled_vae,
                     )
                 except Exception as e:
                     return PipelineResult(
@@ -1270,7 +1236,7 @@ class PipelineExecutor:
                             output_path=output_path,
                             softness=enhance_softness,
                             seed=current_seed,
-                            tiled_vae=tiled_vae,
+                            tiled_vae=enhance_tiled_vae,
                         )
                     except Exception as e:
                         return PipelineResult(
@@ -1307,7 +1273,7 @@ class PipelineExecutor:
                         output_path=image_path,
                         softness=enhance_softness,
                         seed=image_seed,
-                        tiled_vae=tiled_vae,
+                        tiled_vae=enhance_tiled_vae,
                     )
                 except Exception as e:
                     return PipelineResult(
