@@ -366,3 +366,10 @@ Each entry should follow this structure:
 **What happened:** Separate Standards and Spec reviewers identified one finding each: doubled backslashes could bypass action validation, and repeated quoted literals could double-escape visible hash text. Reproduced both through approved public seams with failing tests; fixed shared escape-aware graph parsing and single-pass longest-match literal protection, including already-escaped input. Both reviewers independently confirmed resolution. No unrelated refactor or external service changes.
 **Outcome:** 375 tests pass; configured Ruff and diff whitespace checks clean. Replayed all 23 accepted corpus grammars and both hardware grammars successfully. Hardware/model code unchanged; previous GPU acceptance remains applicable. Migration ready for the user-authorized semantic commit, including explicit breaking-change and provenance caveats. No push requested.
 **Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Published migration pull request
+
+**Context:** User requested pushing the reviewed migration and creating a PR.
+**What happened:** Refreshed remote refs, confirmed no existing PR for the branch, pushed migration commit aec7146, and opened PR #81 against master with breaking changes, measured verification, and the 23/24 corpus caveat.
+**Outcome:** https://github.com/fabian20ro/prompt-to-image-variations/pull/81. No merge or automatic merge requested. Publication journal recorded in a separate documentation-only commit; application code unchanged.
+**Promoted to Lessons Learned:** No
