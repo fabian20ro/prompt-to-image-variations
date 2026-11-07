@@ -328,12 +328,12 @@ def test_grammar_repairs_invalid_reply_once_and_revalidates_cache(monkeypatch, t
     assert generate_grammar("Teapot")[1]
 
 
-def test_prompt_example_keeps_requested_medium_and_text_across_variations():
+def test_prompt_example_keeps_requested_subject_and_text_across_variations():
     from grammar_generator import get_system_prompt
     prompt = get_system_prompt()
     example = json.loads(prompt.split("Example grammar:\n", 1)[1])
     expanded = run_tracery(json.dumps(example), 50)
-    assert all('Studio photograph' in text and '"MOUNTAIN TEA"' in text for text in expanded)
+    assert all('A single closed ceramic tea canister' in text and '"MOUNTAIN TEA"' in text for text in expanded)
     assert all(len(options) == 7 for name, options in example.items() if name != "origin")
 
 

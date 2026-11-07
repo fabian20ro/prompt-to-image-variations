@@ -161,13 +161,15 @@ Open `http://localhost:8000`. The UI provides:
 
 Qwen returns strict Tracery JSON. Each expansion is a complete continuous caption, following [BFL's guide](https://docs.bfl.ai/guides/prompting_unified_building) and [upsampler instructions](https://huggingface.co/black-forest-labs/flux-3-image-klein-pup/blob/main/system_prompts.json):
 
-1. Medium/style first; explicit user constraints stay fixed.
+1. Medium/style first; explicit user constraints stay fixed. Unspecified medium and style vary too—there is no automatic photography default.
 2. Coherent scene, lighting and framing, then concrete subject details and spatial relationships.
 3. Exact quoted visible wording; no quality-tag padding. Typically 100–350 words, shorter for simple subjects.
 
 Structured posters, infographics, interfaces, and comics describe reading order and text placement in prose. Target canvas is provided to Qwen. Each generated varying rule targets seven distinct alternatives, with five as the minimum. Fixed rules may have one. Imported grammars may use fewer choices. Modifiers, actions, missing references, and cycles are rejected; literal `#`, `[` and `]` must be escaped with a backslash (doubled in JSON). Structured bounding-box layouts are not implemented.
 
-Cache keys include schema, template contents, prompt model, canvas, temperature and input. Cache hits are revalidated. Invalid fresh output receives one repair attempt before a clear error. The example in `templates/system_prompt.txt` keeps its headline and medium fixed, with seven coherent alternatives per variable.
+Qwen treats the input as a creative brief, not an exhaustive list of allowed details. Relevant unspecified traits—appearance, clothing, pose, materials, setting, light, palette, composition and typography—are creative axes. Open briefs usually use 2–5 meaningful variation groups, within eight rules total; dependent choices stay bundled to avoid contradictory combinations. A specified photograph stays photographic, but an unspecified medium can explore photography, painting, illustration, print, collage and renders.
+
+Cache keys include schema, template contents, prompt model, canvas, temperature and input, so edited instructions automatically select a new cache key. Cache hits are revalidated. Invalid fresh output receives one repair attempt before a clear error. The example in `templates/system_prompt.txt` keeps its requested ceramic canister and exact headline fixed, with seven alternatives each for medium/treatment, layout/viewpoint/typography, vessel appearance, and setting/light.
 
 ## Output
 
