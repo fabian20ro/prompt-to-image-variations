@@ -15,6 +15,7 @@
 
 - `run_full_pipeline(...)`
 - `run_from_grammar(...)`
+- `run_from_grammar_text(...)`
 - `run_from_prompts(...)`
 - `regenerate_prompts(...)`
 - `generate_single_image(...)`
@@ -27,6 +28,7 @@
 - Prompt files: `{prefix}_{n}.txt`
 - Images: `{prefix}_{prompt_idx}_{image_idx}.png`
 - Metadata: `{prefix}.metaprompt.json`
+- Per-image provenance/actual seed: `{prefix}_{prompt_idx}_{image_idx}.generation.json`
 - Grammar: `{prefix}_grammar.json`
 - Optional raw LLM response: `{prefix}_raw_response.txt`
 - Gallery: `{prefix}_gallery.html`
@@ -48,6 +50,9 @@ intended count. Image-format handling remains unchanged; no files are rewritten.
 
 ## Extension Points
 
-- Add new model support in `src/image_generator.py` (`MODEL_DEFAULTS`, `_get_model` branches).
-- Add pipeline-wide settings through `PipelineConfig` in `src/pipeline.py`.
+- Fixed renderer: FLUX 3 Image Klein distilled q4, 16 steps, no CFG; no model dispatch.
+- `generation_settings()` owns fixed renderer provenance. Qwen produces complete captions via the versioned template.
+- Grammar/cache/API validation shares `validate_grammar_structure` through `parse_grammar`.
+- Creation requires a fresh output directory. Existing-run rendering rejects legacy/unknown models before writes.
+- Image/enhancement/grammar public boundaries release the other models and MLX allocator cache.
 - Add metadata fields through `src/metadata_manager.py` and readers that consume metadata.

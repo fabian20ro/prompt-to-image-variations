@@ -41,8 +41,8 @@ class TestParseGrammar:
 
     def test_parse_empty_grammar(self):
         """Test parsing empty JSON object."""
-        result = parse_grammar("{}")
-        assert result == {}
+        with pytest.raises(TraceryError, match="origin"):
+            parse_grammar("{}")
 
     def test_parse_empty_string_raises_error(self):
         """Test that an empty string triggers the invalid-JSON TraceryError path."""
@@ -220,24 +220,19 @@ class TestRunTracery:
         assert results == []
 
     def test_parse_grammar_non_dict_json(self):
-        """Test that parse_grammar passes through non-dict JSON (no validation)."""
-        # parse_grammar only calls json.loads — it does not validate the result is a dict.
-        result = parse_grammar("[]")
-        assert isinstance(result, list)
+        """Imported grammars must have an origin object, not arbitrary JSON."""
+        with pytest.raises(TraceryError, match="origin"):
+            parse_grammar("[]")
 
     def test_run_tracery_empty_rule_value(self):
-        """Test grammar with empty string as rule value returns empty strings."""
-        # Tracery handles [""] rule values by producing "" output for that origin.
-        grammar_json = json.dumps({"origin": [""]})
-        results = run_tracery(grammar_json, count=3)
-
-        assert len(results) == 3
-        assert all(r == "" for r in results)
+        """Reject blank caption choices before expansion."""
+        with pytest.raises(TraceryError, match="non-empty strings"):
+            run_tracery(json.dumps({"origin": [""]}), count=3)
 
     def test_run_tracery_complex_grammar(self):
         """Test with a more complex grammar."""
         grammar_json = json.dumps({
-            "origin": ["#mood.a# #animal# in #setting.a#"],
+            "origin": ["A #mood# #animal# in a #setting#"],
             "mood": ["happy", "sad", "curious"],
             "animal": ["cat", "dog", "bird"],
             "setting": ["garden", "forest", "city"],
@@ -375,16 +370,10 @@ class TestTraceryModifiers:
         assert "does_not_exist" in result or "#does_not_exist#" in result
 
     def test_run_tracery_with_modifiers(self):
-        """Test batch generation includes modifier effects."""
-        grammar_json = json.dumps({
-            "origin": ["#mood.a#"],
-            "mood": ["happy", "sad", "curious"],
-        })
-        results = run_tracery(grammar_json, count=50)
-        assert len(results) == 50
-        for r in results:
-            # base_english .a adds 'an' or 'a' based on vowel heuristic
-            assert r.startswith("a ") or r.startswith("an ")
+        """Batch grammar validation explicitly rejects unsupported modifiers."""
+        grammar_json = json.dumps({"origin": ["#mood.a#"], "mood": ["happy", "sad", "curious"]})
+        with pytest.raises(TraceryError, match="modifiers"):
+            run_tracery(grammar_json, count=50)
 
     def test_run_tracery_seeded_calls_are_identical(self):
         """Two calls with the same seed must return identical lists."""
@@ -393,7 +382,7 @@ class TestTraceryModifiers:
         # loop) would let the two calls draw from the advancing global state
         # and this equality assertion would fail.
         grammar_json = json.dumps({
-            "origin": ["#mood.a# #animal# in #setting.a#"],
+            "origin": ["A #mood# #animal# in the #setting#"],
             "mood": ["happy", "sad", "curious"],
             "animal": ["cat", "dog", "bird", "fox"],
             "setting": ["garden", "forest", "city", "cave"],

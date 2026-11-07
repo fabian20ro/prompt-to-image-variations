@@ -9,8 +9,8 @@ from pathlib import Path
 def _default_model_path() -> Path:
     """Cross-platform default path for the mflux model."""
     if platform.system() == "Darwin":
-        return Path.home() / "Library/Caches/mflux/models/ernie-image-turbo-4bit"
-    return Path.home() / ".cache" / "mflux" / "models" / "ernie-image-turbo-4bit"
+        return Path.home() / "Library/Caches/mflux/models/flux3-klein-q4"
+    return Path.home() / ".cache" / "mflux" / "models" / "flux3-klein-q4"
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def _get_env_str(key: str, default: str) -> str:
 class LMStudioConfig:
     """Configuration for LM Studio connection."""
     base_url: str = "http://localhost:1234/v1"
-    model: str = "google/gemma-4-26b-a4b-qat"
+    model: str = "qwen3.8-27b-splash"
     timeout: float = 60.0  # seconds
 
     def __post_init__(self):
@@ -190,7 +190,7 @@ class Settings:
             default_height=_get_env_int("PROMPT_GEN_DEFAULT_HEIGHT", ImageGenerationConfig.default_height),
             seed=_get_env_int("PROMPT_GEN_IMAGE_SEED", 0),
             model_path=Path(os.environ.get(
-                "PROMPT_GEN_ERNIE_MODEL_PATH",
+                "PROMPT_GEN_IMAGE_MODEL_PATH",
                 str(_default_model_path()),
             )),
         )
@@ -244,8 +244,8 @@ ENV_VAR_DOCS: dict[str, dict[str, str]] = {
         "default": str(ImageGenerationConfig.seed),
         "type": "int",
     },
-    "PROMPT_GEN_ERNIE_MODEL_PATH": {
-        "desc": "Path to the Ernie image model (cross-platform auto-detected if unset)",
+    "PROMPT_GEN_IMAGE_MODEL_PATH": {
+        "desc": "Path to the saved FLUX 3 Klein q4 checkpoint (cross-platform auto-detected if unset)",
         "default": str(_default_model_path()),
         "type": "str",
     },
@@ -260,7 +260,7 @@ ENV_VAR_DOCS: dict[str, dict[str, str]] = {
         "type": "float",
     },
     "PROMPT_GEN_WORKER_TIMEOUT": {
-        "desc": "Worker task timeout in seconds (must be positive)",
+        "desc": "Worker output liveness-check interval in seconds (must be positive)",
         "default": str(ServerConfig.worker_timeout),
         "type": "float",
     },

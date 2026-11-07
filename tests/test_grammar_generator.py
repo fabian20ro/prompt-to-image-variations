@@ -1,4 +1,5 @@
 import unittest
+import json
 import sys
 from pathlib import Path
 
@@ -178,7 +179,7 @@ class TestGrammarTools(unittest.TestCase):
 
     def test_hash_prompt_binds_schema_version(self):
         # The grammar cache key must include the schema version so that when
-        # PROMPT_SCHEMA_VERSION changes (e.g. from "ernie-v2" to a future v3),
+        # PROMPT_SCHEMA_VERSION changes (e.g. from "flux3-caption-v1" to a future v3),
         # stale grammars are not reused across schemas — preserving correctness
         # of the entire generation pipeline on cache hit.
         prompt = "a cat"
@@ -206,7 +207,7 @@ class TestGrammarTools(unittest.TestCase):
         result = get_system_prompt()
         self.assertEqual(result, "system prompt content")
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.get")
     @patch("grammar_generator.requests.post")
     def test_generate_grammar_uses_native_chat_without_reasoning(
@@ -215,8 +216,8 @@ class TestGrammarTools(unittest.TestCase):
         mock_get.return_value.json.return_value = {
             "models": [
                 {
-                    "key": "google/gemma-4-26b-a4b-qat",
-                    "loaded_instances": [{"id": "google/gemma-4-26b-a4b-qat"}],
+                    "key": "qwen3.8-27b-splash",
+                    "loaded_instances": [{"id": "qwen3.8-27b-splash"}],
                 }
             ]
         }
@@ -234,15 +235,15 @@ class TestGrammarTools(unittest.TestCase):
             use_cache=False,
         )
 
-        assert grammar == grammar_json
-        assert raw == grammar
+        assert json.loads(grammar) == json.loads(grammar_json)
+        assert raw == grammar_json
         assert was_cached is False
         mock_post.assert_called_once_with(
             "http://localhost:1234/api/v1/chat",
             json={
-                "model": "google/gemma-4-26b-a4b-qat",
-                "input": "a cat",
-                "system_prompt": "ERNIE instructions",
+                "model": "qwen3.8-27b-splash",
+                "input": "TARGET CANVAS: 864:1152\na cat",
+                "system_prompt": "FLUX instructions",
                 "temperature": 0.7,
                 "max_output_tokens": 4096,
                 "reasoning": "off",
@@ -259,7 +260,7 @@ class TestGrammarTools(unittest.TestCase):
     def test_ensure_lm_model_loaded_waits_for_native_load(self, mock_post, mock_get):
         mock_get.return_value.json.return_value = {
             "models": [
-                {"key": "google/gemma-4-26b-a4b-qat", "loaded_instances": []}
+                {"key": "qwen3.8-27b-splash", "loaded_instances": []}
             ]
         }
         mock_post.return_value.json.return_value = {"status": "loaded"}
@@ -268,7 +269,7 @@ class TestGrammarTools(unittest.TestCase):
 
         mock_post.assert_called_once_with(
             "http://localhost:1234/api/v1/models/load",
-            json={"model": "google/gemma-4-26b-a4b-qat", "context_length": 8192},
+            json={"model": "qwen3.8-27b-splash", "context_length": 8192},
             timeout=180.0,
         )
         mock_post.return_value.raise_for_status.assert_called_once_with()
@@ -283,11 +284,13 @@ class TestGrammarTools(unittest.TestCase):
 
         mock_get.return_value.json.return_value = {
             "models": [
-                {"key": "google/gemma-4-26b-a4b-qat", "loaded_instances": []}
+                {"key": "qwen3.8-27b-splash", "loaded_instances": []}
             ]
         }
         failed = MagicMock()
-        failed.raise_for_status.side_effect = requests.HTTPError("load canceled")
+        error_response = requests.Response()
+        error_response.status_code = 409
+        failed.raise_for_status.side_effect = requests.HTTPError("load canceled", response=error_response)
         loaded = MagicMock()
         loaded.json.return_value = {"status": "loaded"}
         mock_post.side_effect = [failed, loaded]
@@ -318,7 +321,7 @@ class TestGrammarTools(unittest.TestCase):
         mock_post.assert_not_called()
         mock_sleep.assert_not_called()
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.get")
     @patch("grammar_generator.requests.post")
     @patch("grammar_generator.cache_grammar")
@@ -332,8 +335,8 @@ class TestGrammarTools(unittest.TestCase):
         mock_get.return_value.json.return_value = {
             "models": [
                 {
-                    "key": "google/gemma-4-26b-a4b-qat",
-                    "loaded_instances": [{"id": "google/gemma-4-26b-a4b-qat"}],
+                    "key": "qwen3.8-27b-splash",
+                    "loaded_instances": [{"id": "qwen3.8-27b-splash"}],
                 }
             ]
         }
@@ -341,7 +344,7 @@ class TestGrammarTools(unittest.TestCase):
             "output": [{"type": "message", "content": "I can't produce a grammar."}]
         }
 
-        with self.assertRaisesRegex(ValueError, "invalid JSON grammar"):
+        with self.assertRaisesRegex(ValueError, "Invalid grammar after one repair"):
             generate_grammar(
                 "a cat",
                 base_url="http://localhost:1234/v1",
@@ -351,7 +354,7 @@ class TestGrammarTools(unittest.TestCase):
         mock_cache.assert_not_called()
         mock_get_cached.assert_called_once()
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.get")
     @patch("grammar_generator.requests.post")
     @patch("grammar_generator.cache_grammar")
@@ -366,8 +369,8 @@ class TestGrammarTools(unittest.TestCase):
         mock_get.return_value.json.return_value = {
             "models": [
                 {
-                    "key": "google/gemma-4-26b-a4b-qat",
-                    "loaded_instances": [{"id": "google/gemma-4-26b-a4b-qat"}],
+                    "key": "qwen3.8-27b-splash",
+                    "loaded_instances": [{"id": "qwen3.8-27b-splash"}],
                 }
             ]
         }
@@ -394,32 +397,32 @@ class TestGrammarTools(unittest.TestCase):
 class TestEmptyPromptGuard(unittest.TestCase):
     """Tests for rejecting empty/whitespace-only prompts at the entry point."""
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.post")
     @patch("grammar_generator.requests.get")
     def test_generate_grammar_rejects_empty_string(self, mock_get, mock_post, _mock_prompt):
         with self.assertRaises(ValueError, msg="empty prompt must raise ValueError"):
             generate_grammar("")
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.post")
     @patch("grammar_generator.requests.get")
     def test_generate_grammar_rejects_whitespace_only(self, mock_get, mock_post, _mock_prompt):
         with self.assertRaises(ValueError):
             generate_grammar("   \t\n  ")
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.post")
     @patch("grammar_generator.requests.get")
     def test_generate_grammar_passes_nonempty_prompt(self, mock_get, mock_post, _mock_prompt):
         # Sanity: a real prompt still reaches the cache-hit path (returns cached grammar).
         mock_get.return_value.json.return_value = {
             "models": [
-                {"key": "google/gemma-4-26b-a4b-qat", "loaded_instances": [{"id": "x"}]}
+                {"key": "qwen3.8-27b-splash", "loaded_instances": [{"id": "x"}]}
             ]
         }
         # Pre-populate cache so generate_grammar returns the cached result without calling LM Studio.
-        with patch("grammar_generator.get_cached_grammar", return_value='{"origin":["#s#"]}'):
+        with patch("grammar_generator.get_cached_grammar", return_value='{"origin":["#s#"],"s":["a","b","c","d","e"]}'):
             grammar, was_cached, raw = generate_grammar("a real prompt")
         assert was_cached is True
         # The cache path must be reached — no POST should have been issued.
@@ -496,7 +499,7 @@ class TestApiRoot(unittest.TestCase):
 class TestEmptyPromptGuardMessages(unittest.TestCase):
     """Tests for exact error messages from empty/whitespace prompt rejection."""
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.post")
     @patch("grammar_generator.requests.get")
     def test_generate_grammar_rejects_empty_string_with_exact_message(
@@ -507,7 +510,7 @@ class TestEmptyPromptGuardMessages(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"^User prompt must not be empty$"):
             generate_grammar("")
 
-    @patch("grammar_generator.get_system_prompt", return_value="ERNIE instructions")
+    @patch("grammar_generator.get_system_prompt", return_value="FLUX instructions")
     @patch("grammar_generator.requests.post")
     @patch("grammar_generator.requests.get")
     def test_generate_grammar_rejects_whitespace_with_exact_message(
@@ -629,7 +632,7 @@ class TestCacheFileNaming(unittest.TestCase):
                 self.assertEqual(metadata["user_prompt"], user_prompt)
                 self.assertEqual(type(metadata["created_at"]), str)
                 self.assertIn("prompt_schema", metadata)
-                self.assertEqual(metadata["prompt_schema"], "ernie-v2")
+                self.assertEqual(metadata["prompt_schema"], "flux3-caption-v1")
                 self.assertIn("lm_model", metadata)
 
 

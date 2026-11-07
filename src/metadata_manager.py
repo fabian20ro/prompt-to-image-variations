@@ -34,7 +34,7 @@ class RunMetadata:
     prefix: str = "image"
     count: int = 0
     user_prompt: str = ""
-    model: str = "ernie-image-turbo"
+    model: str = "unknown"
     created_at: str = ""
     grammar_cached: bool = False
     image_generation: dict = field(default_factory=dict)
@@ -55,7 +55,7 @@ class RunMetadata:
             prefix=data.get("prefix", "image"),
             count=data.get("count", 0),
             user_prompt=data.get("user_prompt", ""),
-            model=data.get("model", "ernie-image-turbo"),
+            model=data.get("model", "unknown"),
             created_at=data.get("created_at", ""),
             grammar_cached=data.get("grammar_cached", False),
             image_generation=data.get("image_generation", {}),

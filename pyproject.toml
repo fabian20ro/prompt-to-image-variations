@@ -3,7 +3,7 @@ name = "prompt-to-image-variations"
 version = "0.1.0"
 description = "Turn an image idea into concrete prompt variations with optional local rendering."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "click>=8.0.0",
   "fastapi>=0.109.0",
@@ -18,7 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 images = [
-  "mflux>=0.18.0",
+  "mflux==0.24.0",
 ]
 
 [dependency-groups]
@@ -31,7 +31,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]

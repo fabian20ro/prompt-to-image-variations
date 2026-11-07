@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from tracery_runner import parse_grammar, TraceryError
 import logging
 import mimetypes
 from pathlib import Path
@@ -201,9 +202,9 @@ async def start_generation(req: GenerateRequest):
 async def start_generation_from_grammar(req: GenerateFromGrammarRequest):
     """Create a new gallery directly from pasted Tracery grammar."""
     try:
-        json.loads(req.grammar)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON grammar")
+        parse_grammar(req.grammar)
+    except TraceryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     qm = get_queue_manager()
     task = qm.add_task(
@@ -450,9 +451,9 @@ async def update_grammar(
 
     # Validate JSON
     try:
-        json.loads(req.grammar)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON grammar")
+        parse_grammar(req.grammar)
+    except TraceryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     prefix = service.get_prefix(run_dir)
     grammar_file = service.get_grammar_file(run_dir, prefix)
@@ -507,9 +508,9 @@ async def regenerate_prompts(
         raise HTTPException(status_code=404, detail="Grammar not found")
 
     try:
-        json.loads(grammar)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON grammar")
+        parse_grammar(grammar)
+    except TraceryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     prefix = service.get_prefix(run_dir)
     append_grammar_revision(run_dir, prefix, grammar, action="save")

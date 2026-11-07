@@ -50,7 +50,7 @@ def create_gallery(
         Path to the created gallery.html file
     """
     gallery_path = output_dir / f"{prefix}_gallery.html"
-    total_images = len(prompts) * max(images_per_prompt, 1)
+    total_images = len(prompts) * images_per_prompt
 
     # Build cards for all prompts
     cards_html = []
@@ -83,7 +83,7 @@ def create_gallery(
                 cards_html.append(card)
 
     # Count existing images
-    completed = sum(1 for p_idx, p in enumerate(prompts) for i in range(max(images_per_prompt, 1))
+    completed = sum(1 for p_idx, p in enumerate(prompts) for i in range(images_per_prompt)
                    if (output_dir / f"{prefix}_{p_idx}_{i}.png").exists())
 
     gallery_html = _build_gallery_html(
@@ -344,11 +344,11 @@ def _build_image_settings_section(image_settings: dict, layout_settings: dict) -
       <div class="form-row">
         <div class="form-group">
           <label for="img-width">Width</label>
-          <input type="number" id="img-width" name="width" value="{width}" step="8">
+          <input type="number" id="img-width" name="width" value="{width}" step="16">
         </div>
         <div class="form-group">
           <label for="img-height">Height</label>
-          <input type="number" id="img-height" name="height" value="{height}" step="8">
+          <input type="number" id="img-height" name="height" value="{height}" step="16">
         </div>
       </div>
       <div class="form-row">

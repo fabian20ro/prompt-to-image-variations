@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entry point for the ERNIE-Image-Turbo prompt generator."""
+"""CLI entry point for the FLUX 3 Image Klein prompt generator."""
 
 import shutil
 import sys
@@ -257,9 +257,9 @@ def _status_echo(message: str) -> None:
     help='Skip already-generated images when resuming interrupted runs'
 )
 @click.option(
-    '--no-tiled-vae',
+    '--no-enhance-tiled-vae',
     is_flag=True,
-    help='Disable tiled VAE decoding (uses more memory but may be faster)'
+    help='Disable SeedVR2 tiled VAE decoding; does not affect FLUX generation'
 )
 @click.option(
     '--serve',
@@ -313,7 +313,7 @@ def main(
     enhance_after: bool,
     enhance_images: str | None,
     resume: bool,
-    no_tiled_vae: bool,
+    no_enhance_tiled_vae: bool,
     serve: bool,
     port: int,
     as_json: bool = False,
@@ -324,7 +324,7 @@ def main(
     full: bool = False,
 ):
     """
-    Generate ERNIE-Image-Turbo prompt variations using local LLM-powered Tracery grammars.
+    Generate FLUX 3 Image Klein prompt variations using local LLM-powered Tracery grammars.
 
     Example:
         uv run python src/cli.py -p "a dragon flying over mountains" -n 50
@@ -413,7 +413,7 @@ def main(
 
     # STANDALONE MODE: Enhance existing images
     if enhance_images:
-        _run_standalone_enhancement(enhance_images, enhance_softness, seed, no_tiled_vae)
+        _run_standalone_enhancement(enhance_images, enhance_softness, seed, no_enhance_tiled_vae)
         return
 
     # Validation
@@ -439,12 +439,18 @@ def main(
 
     # Set defaults
     prefix = prefix or "image"
-    width = width or settings.image_generation.default_width
-    height = height or settings.image_generation.default_height
+    if not from_prompts:
+        width = settings.image_generation.default_width if width is None else width
+        height = settings.image_generation.default_height if height is None else height
+    from image_generator import validate_dimensions
+    try:
+        validate_dimensions(width if width is not None else 864, height if height is not None else 1152)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc)) from exc
 
     # Handle --dry-run (needs special handling for grammar preview)
     if dry_run:
-        _run_dry_run(prompt, from_grammar, base_url, no_cache, temperature)
+        _run_dry_run(prompt, from_grammar, base_url, no_cache, temperature, width, height)
         return
 
     # Create executor with CLI progress callback
@@ -460,7 +466,7 @@ def main(
             height=height,
             seed=seed,
             max_prompts=max_prompts,
-            tiled_vae=not no_tiled_vae,
+            enhance_tiled_vae=not no_enhance_tiled_vae,
             enhance=enhance,
             enhance_softness=enhance_softness,
             enhance_after=enhance_after,
@@ -480,7 +486,7 @@ def main(
             height=height,
             seed=seed,
             max_prompts=max_prompts,
-            tiled_vae=not no_tiled_vae,
+            enhance_tiled_vae=not no_enhance_tiled_vae,
             enhance=enhance,
             enhance_softness=enhance_softness,
             enhance_after=enhance_after,
@@ -493,6 +499,7 @@ def main(
         click.echo(f"Generating grammar for: {prompt}")
         result = executor.run_full_pipeline(
             prompt=prompt,
+            base_url=base_url,
             count=count,
             prefix=prefix,
             temperature=temperature,
@@ -503,7 +510,7 @@ def main(
             height=height,
             seed=seed,
             max_prompts=max_prompts,
-            tiled_vae=not no_tiled_vae,
+            enhance_tiled_vae=not no_enhance_tiled_vae,
             enhance=enhance,
             enhance_softness=enhance_softness,
             enhance_after=enhance_after,
@@ -540,7 +547,7 @@ def _run_standalone_enhancement(
     enhance_images: str,
     enhance_softness: float,
     seed: int | None,
-    no_tiled_vae: bool,
+    no_enhance_tiled_vae: bool,
 ) -> None:
     """Run standalone image enhancement mode."""
     click.echo(f"Collecting images from: {enhance_images}")
@@ -553,14 +560,14 @@ def _run_standalone_enhancement(
     with click.progressbar(images, label=f"Enhancing {len(images)} images") as bar:
         current_seed = seed
         for img_path in bar:
-            bar.write(f"\nEnhancing {img_path.name} (replacing original)...")
+            click.echo(f"\nEnhancing {img_path.name} (replacing original)...")
             try:
                 enhance_image(
                     image_path=img_path,
                     output_path=img_path,
                     softness=enhance_softness,
                     seed=current_seed,
-                    tiled_vae=not no_tiled_vae,
+                    tiled_vae=not no_enhance_tiled_vae,
                 )
             except ImportError as e:
                 click.echo(f"Error: {e}", err=True)
@@ -581,6 +588,8 @@ def _run_dry_run(
     base_url: str,
     no_cache: bool,
     temperature: float,
+    width: int = 864,
+    height: int = 1152,
 ) -> None:
     """Run dry-run mode to preview grammar."""
     if from_grammar:
@@ -597,6 +606,8 @@ def _run_dry_run(
                 base_url=base_url,
                 use_cache=not no_cache,
                 temperature=temperature,
+                width=width,
+                height=height,
             )
         except KeyboardInterrupt:
             click.echo("\nInterrupted.", err=True)
@@ -630,7 +641,7 @@ def _print_settings(quiet: bool = False) -> None:
     if not quiet:
         import dataclasses as dc
 
-        print("ERNIE-Image-Turbo CLI Settings")
+        print("FLUX 3 Image Klein CLI Settings")
         print("=" * 50)
         for name, obj in [("LM Studio", settings.lm_studio),
                            ("Image Generation", settings.image_generation),

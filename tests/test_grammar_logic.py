@@ -98,13 +98,10 @@ def test_clean_grammar_output_normalizes_smart_quotes():
     assert result == expected
 
 
-def test_clean_grammar_output_normalizes_smart_single_quotes():
-    """Left/right single curly quotes (U+2018, U+2019) must be replaced with straight ASCII apostrophes."""
-    raw = '{"prompt": "a cat\u2019s eye"}'  # \u2019 is right single curly quote
-    result = clean_grammar_output(raw)
-    assert '\u2019' not in result and '\u2018' not in result
-    expected = '{"prompt": "a cat\'s eye"}'
-    assert result == expected
+def test_clean_grammar_output_preserves_smart_single_quotes_in_valid_json():
+    """Visible Unicode typography in valid JSON must remain unchanged."""
+    raw = '{"prompt": "a cat’s eye"}'
+    assert clean_grammar_output(raw) == raw
 
 
 def test_clean_grammar_output_strips_thinking_blocks():

@@ -20,8 +20,8 @@ class TestConfig:
         assert settings.image_generation.default_width == 864
         assert settings.image_generation.default_height == 1152
         assert settings.image_generation.seed == 0
-        assert settings.lm_studio.model == "google/gemma-4-26b-a4b-qat"
-        assert settings.image_generation.model_path.name == "ernie-image-turbo-4bit"
+        assert settings.lm_studio.model == "qwen3.8-27b-splash"
+        assert settings.image_generation.model_path.name == "flux3-klein-q4"
         assert settings.server.sse_queue_size == 100
         assert settings.enhancement.default_softness == 0.5
 
@@ -53,14 +53,14 @@ class TestConfig:
         assert isinstance(default, Path)
         # On any platform this should resolve to a sensible location
         assert "mflux" in str(default)
-        assert "ernie-image-turbo-4bit" in str(default)
+        assert "flux3-klein-q4" in str(default)
 
     def test_env_override_uses_default_function(self):
         """Test that env override still works with cross-platform default."""
         from config import _default_model_path, ImageGenerationConfig
 
         custom_path = "/custom/model/path"
-        with patch.dict(os.environ, {"PROMPT_GEN_ERNIE_MODEL_PATH": custom_path}):
+        with patch.dict(os.environ, {"PROMPT_GEN_IMAGE_MODEL_PATH": custom_path}):
             settings = Settings.from_env()
             assert str(settings.image_generation.model_path) == custom_path
 
@@ -68,7 +68,7 @@ class TestConfig:
         """Test that from_env() auto-detects the model path when the env key is unset.
 
         Mirrors test_env_override_uses_default_function (key set -> override):
-        when PROMPT_GEN_ERNIE_MODEL_PATH is absent, from_env must fall back to the
+        when PROMPT_GEN_IMAGE_MODEL_PATH is absent, from_env must fall back to the
         cross-platform _default_model_path() — the documented default — instead of
         raising or producing a blank path.
         """
@@ -91,7 +91,7 @@ class TestConfig:
              patch.object(Path, "home", return_value=tmp_path):
             result = config._default_model_path()
 
-        assert result == tmp_path / "Library/Caches/mflux/models/ernie-image-turbo-4bit"
+        assert result == tmp_path / "Library/Caches/mflux/models/flux3-klein-q4"
 
     def test_default_model_path_non_darwin_branch(self, tmp_path):
         """Test that _default_model_path uses the .cache location on non-Darwin platforms."""
@@ -102,14 +102,14 @@ class TestConfig:
              patch.object(Path, "home", return_value=tmp_path):
             result = config._default_model_path()
 
-        assert result == tmp_path / ".cache/mflux/models/ernie-image-turbo-4bit"
+        assert result == tmp_path / ".cache/mflux/models/flux3-klein-q4"
 
     def test_default_settings_model_and_model_path(self):
         """Test that default Settings expose the LM Studio model id and the platform model path."""
         from config import _default_model_path
 
         settings = Settings()
-        assert settings.lm_studio.model == "google/gemma-4-26b-a4b-qat"
+        assert settings.lm_studio.model == "qwen3.8-27b-splash"
         assert settings.image_generation.model_path == _default_model_path()
 
     def test_immutable_config(self):
@@ -518,7 +518,7 @@ class TestEnvVarDocs:
             "PROMPT_GEN_DEFAULT_WIDTH",
             "PROMPT_GEN_DEFAULT_HEIGHT",
             "PROMPT_GEN_IMAGE_SEED",
-            "PROMPT_GEN_ERNIE_MODEL_PATH",
+            "PROMPT_GEN_IMAGE_MODEL_PATH",
             "PROMPT_GEN_SSE_QUEUE_SIZE",
             "PROMPT_GEN_SSE_TIMEOUT",
             "PROMPT_GEN_WORKER_TIMEOUT",

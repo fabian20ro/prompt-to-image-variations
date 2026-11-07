@@ -8,6 +8,7 @@ import signal
 import sys
 import tempfile
 from pathlib import Path
+from config import settings
 
 from .models import TaskProgress
 from .queue_manager import QueueManager
@@ -187,7 +188,7 @@ class Worker:
                 try:
                     line = await asyncio.wait_for(
                         self._current_process.stdout.readline(),
-                        timeout=300.0  # 5 minutes between output lines (image gen can be slow)
+                        timeout=settings.server.worker_timeout  # Liveness check, not a task deadline.
                     )
                 except asyncio.TimeoutError:
                     if self._current_process.returncode is not None:

@@ -71,11 +71,11 @@ class GenerateRequest(BaseModel):
     no_cache: bool = False
     generate_images: bool = False
     images_per_prompt: int = Field(1, ge=1, le=100)
-    width: int = Field(864, ge=64, le=4096)
-    height: int = Field(1152, ge=64, le=4096)
+    width: int = Field(864, ge=64, le=4096, multiple_of=16)
+    height: int = Field(1152, ge=64, le=4096, multiple_of=16)
     seed: int | None = Field(None, ge=0)
     max_prompts: int | None = Field(None, ge=1)
-    tiled_vae: bool = False
+    enhance_tiled_vae: bool = False
     enhance: bool = False
     enhance_softness: float = Field(0.5, ge=0.0, le=1.0)
     enhance_after: bool = False
@@ -125,8 +125,8 @@ class GenerateAllImagesRequest(BaseModel):
     images_per_prompt: int = Field(1, ge=0, le=100)
     resume: bool = True
     # Image generation settings (override metadata defaults)
-    width: int | None = Field(None, ge=64, le=4096)
-    height: int | None = Field(None, ge=64, le=4096)
+    width: int | None = Field(None, ge=64, le=4096, multiple_of=16)
+    height: int | None = Field(None, ge=64, le=4096, multiple_of=16)
     seed: int | None = Field(None, ge=0)
     max_prompts: int | None = Field(None, ge=1)
     # Enhancement settings
@@ -150,8 +150,8 @@ class GenerateFromGrammarRequest(BaseModel):
     prefix: str = Field("image", min_length=1, max_length=100, pattern=r'^[a-zA-Z0-9_-]+$')
     images_per_prompt: int = Field(1, ge=0, le=100)
     max_prompts: int | None = Field(None, ge=1)
-    width: int = Field(864, ge=64, le=4096)
-    height: int = Field(1152, ge=64, le=4096)
+    width: int = Field(864, ge=64, le=4096, multiple_of=16)
+    height: int = Field(1152, ge=64, le=4096, multiple_of=16)
     seed: int | None = Field(None, ge=0)
 
 

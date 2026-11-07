@@ -1,315 +1,89 @@
-from pathlib import Path
-from types import SimpleNamespace
-from src.grammar_generator import get_system_prompt, hash_prompt, get_cached_grammar, cache_grammar, get_cached_raw_response
+"""Prompt-template requirements for the caption-only FLUX workflow."""
+
 import json
+from types import SimpleNamespace
+
+import pytest
+
+from grammar_generator import get_system_prompt, validate_grammar_structure
+from tracery_runner import run_tracery
+
 
 def test_get_system_prompt_default(tmp_path):
-    # Setup: create a dummy template file
-    template_file = tmp_path / "system_prompt.txt"
-    template_file.write_text("generic prompt")
-    
-    # When
-    prompt = get_system_prompt(templates_dir=tmp_path)
-    
-    # Then
-    assert prompt == "generic prompt"
+    (tmp_path / "system_prompt.txt").write_text("generic prompt")
+    assert get_system_prompt(templates_dir=tmp_path) == "generic prompt"
 
 
 def test_get_system_prompt_default_uses_configured_templates_dir(tmp_path, monkeypatch):
-    """The no-argument default must read from the configured templates directory.
-
-    The template content tests exercise the no-argument call against the real
-    project template, which cannot distinguish a default that ignores
-    ``paths.templates_dir`` (e.g. hardcoded to a CWD-relative path) from the
-    configured one when both resolve to the same file. Pointing the configured
-    directory at a temp location with distinct content proves the config lookup
-    is actually honored.
-    """
     configured = tmp_path / "configured_templates"
     configured.mkdir()
     (configured / "system_prompt.txt").write_text("configured prompt")
-
-    monkeypatch.setattr(
-        "src.grammar_generator.paths",
-        SimpleNamespace(templates_dir=configured),
-    )
-
+    monkeypatch.setattr("grammar_generator.paths", SimpleNamespace(templates_dir=configured))
     assert get_system_prompt() == "configured prompt"
 
 
-def test_project_system_prompt_is_ernie_specific():
+def test_project_system_prompt_is_flux_specific():
     prompt = get_system_prompt()
-    assert "ERNIE-Image-Turbo" in prompt
+    assert "FLUX 3 Image Klein" in prompt
     assert "Tracery" in prompt
-    assert "Subject: exact identity" in prompt
-    assert "Description and details" in prompt
-    assert "Style and medium" in prompt
-    assert "Technical and capture finish" in prompt
-    assert "exactly 7 distinct" in prompt
-    assert "Never use 2–4 alternatives" in prompt
+    assert "continuous" in prompt
+    assert "TARGET CANVAS" in prompt
 
 
-def test_system_prompt_contains_all_content_type_patterns():
-    """Verify the template includes all five documented content-type patterns."""
+@pytest.mark.parametrize("requirement", [
+    "Return ONE strict JSON object only",
+    "No Markdown, explanations, or reasoning",
+    'Include an "origin" array',
+    "Each rule is a non-empty array of strings",
+    "references use #rule#",
+    "No modifiers, actions, recursion, or layout JSON",
+    "use at most 8 rules total",
+    "At least one reachable rule must vary",
+    "7 distinct alternatives",
+    "5 or 6 are acceptable",
+    "Never 2–4",
+    "No duplicates or synonym padding",
+    "100–350 words",
+    "Avoid padding simple requests",
+    "Preserve explicit subjects, attributes, counts, positions, style, and exact visible wording",
+    "Preserve visible wording in its original script, case, punctuation, and line breaks",
+    "wrap it in double quotes escaped for JSON",
+    "foreground, midground, background, frame-left and frame-right",
+    "posters, pages, grids, and comics",
+    "Express exclusions as what is present",
+    "Do not include inference steps, guidance, quantization, or model names",
+])
+def test_template_retains_generation_guardrails(requirement):
+    assert requirement in get_system_prompt()
+
+
+def test_system_prompt_example_expands_valid_captions():
+    grammar = json.loads(get_system_prompt().split("Example grammar:\n", 1)[1])
+    validate_grammar_structure(grammar)
+    assert all(len(options) == 7 for name, options in grammar.items() if name != "origin")
+    captions = run_tracery(json.dumps(grammar), 7)
+    assert all('"MOUNTAIN TEA"' in caption and "A single closed ceramic tea canister" in caption for caption in captions)
+
+
+def test_example_explores_open_medium_and_multiple_visual_axes():
+    grammar = json.loads(get_system_prompt().split("Example grammar:\n", 1)[1])
+    validate_grammar_structure(grammar)
+    varying = [name for name, options in grammar.items() if len(options) > 1]
+    assert len(varying) >= 4, "An open brief must demonstrate more than scene/finish variation"
+
+    captions = run_tracery(json.dumps(grammar), 256, seed=42)
+    for medium in ("photograph", "watercolor", "oil painting", "linocut", "vector", "3D render", "paper-cut"):
+        assert any(medium.lower() in caption.lower().split(".", 1)[0] for caption in captions)
+    assert all(caption.count('"MOUNTAIN TEA"') == 1 for caption in captions)
+
+
+def test_template_treats_unspecified_traits_as_creative_axes_not_fixed_defaults():
     prompt = get_system_prompt()
-    for pattern in ["Portrait", "Product", "Poster/infographic", "Comic", "Landscape/concept art"]:
-        assert f"- {pattern}:" in prompt, f"Missing content-type pattern: {pattern}"
-
-
-def test_system_prompt_enforces_single_quote_visible_text():
-    """Verify the template requires wrapping visible text in single quotes."""
-    prompt = get_system_prompt()
-    assert "wrap each visible string in single quotes" in prompt
-
-
-def test_system_prompt_forbids_vague_placeholders():
-    """The template explicitly lists forbidden vague placeholders to prevent low-quality prompts.
-
-    These phrases are listed as examples of what the generator must never emit.
-    Their presence in the system prompt confirms the quality guardrail is active.
-    """
-    prompt = get_system_prompt()
-    for placeholder in [
-        '"some text"',
-        '"a button"',
-        '"relevant facts"',
-        '"and so on"',
-    ]:
-        assert (
-            placeholder in prompt
-        ), f"Forbidden vague placeholder guardrail missing: {placeholder}"
-
-
-def test_system_prompt_forbids_markdown_and_commentary():
-    """Verify the template explicitly forbids Markdown formatting, commentary, and reasoning output.
-
-    The generator must return pure JSON — never prose, explanations, or markdown-wrapped blocks.
-    These prohibitions are listed in the system prompt to prevent low-quality responses.
-    """
-    prompt = get_system_prompt()
-    for prohibition in [
-        "No Markdown",
-        "commentary",
-        "reasoning",
-    ]:
-        assert (
-            prohibition in prompt
-        ), f"Output guardrail missing from system prompt: {prohibition}"
-
-
-def test_system_prompt_forbids_duplicate_alternatives():
-    """Verify the template explicitly forbids duplicating or near-duplicating Tracery alternatives.
-
-    The grammar generator must produce truly distinct options per rule — not inflated counts of
-    nearly identical entries. This guardrail prevents wasted variation and low-quality grammars.
-    """
-    prompt = get_system_prompt()
-    for prohibition in [
-        "duplicate",
-        "rephrase",
-    ]:
-        assert (
-            prohibition in prompt
-        ), f"Anti-duplicate guardrail missing from system prompt: {prohibition}"
-
-
-def test_system_prompt_enforces_output_quality_constraints():
-    """Verify the template enforces word count, contradiction avoidance, style consistency, and translation rules.
-
-    These constraints prevent low-quality or inconsistent outputs across series generation.
-    """
-    prompt = get_system_prompt()
-    for constraint in [
-        "50–150 words",
-        "contradictory",
-        "consistent across a series",
-        "Do not translate it",
-    ]:
-        assert (
-            constraint in prompt
-        ), f"Output quality constraint missing from system prompt: {constraint}"
-
-
-def test_system_prompt_forbids_inference_metadata():
-    """Verify the template forbids embedding inference metadata into prompts.
-
-    The generator must never write guidance scale, quantization info, or numeric resolution
-    into the expanded prompt — the application controls those parameters separately.
-    """
-    prompt = get_system_prompt()
-    for forbidden in [
-        "guidance scale",
-        "quantization",
-        "numeric output resolution",
-    ]:
-        assert (
-            forbidden in prompt
-        ), f"Inference metadata prohibition missing from system prompt: {forbidden}"
-
-
-def test_system_prompt_requires_origin_rule():
-    """Verify the template requires an "origin" rule in every grammar.
-
-    The origin rule is the entry point for all expansion; without it
-    no valid Tracery grammar can be generated. Its presence confirms
-    the structural invariant is enforced by the prompt itself.
-    """
-    prompt = get_system_prompt()
-    assert '"origin"' in prompt, "Origin rule requirement missing from system prompt"
-
-
-def test_system_prompt_requires_hash_references():
-    """Verify the template mandates #rule# references and forbids square brackets.
-
-    Tracery grammar validity depends on hash-delimited references;
-    square-bracket placeholders would produce invalid grammars.
-    This assertion confirms the format contract is enforced upstream.
-    """
-    prompt = get_system_prompt()
-    assert "#rule#" in prompt, "Hash-reference requirement missing from system prompt"
-    assert "square-bracket" in prompt or "[placeholder" in prompt, (
-        "Square-bracket placeholder prohibition missing from system prompt"
-    )
-
-
-def test_system_prompt_enforces_grammar_rule_format():
-    """Verify the template enforces Tracery grammar structural invariants.
-
-    The origin rule is the expansion entry point; without it no valid grammar can be generated.
-    Every rule value must be a non-empty array of strings so Tracery can expand them,
-    and every #rule# reference must resolve or generation would fail at runtime.
-    These are structural guarantees that protect downstream consumers from malformed grammars.
-    """
-    prompt = get_system_prompt()
-    for invariant in [
-        "non-empty array of strings",
-        "#rule# reference must resolve",
-        "\"origin\" rule",
-    ]:
-        assert (
-            invariant in prompt
-        ), f"Grammar structural invariant missing from system prompt: {invariant}"
-
-
-def test_system_prompt_requires_strict_json_output():
-    """Verify the template mandates strict JSON output: double-quoted strings and no trailing commas.
-
-    Tracery grammars are parsed with ``json.loads`` / ``JSONDecoder.raw_decode`` after the
-    LLM response is cleaned. Strict JSON forbids trailing commas, so the system prompt must
-    explicitly require double-quoted strings and no trailing commas — otherwise the model
-    could emit a trailing comma that ``json.loads`` rejects, making generation fail with a
-    spurious invalid-JSON error. This confirms the output-discipline contract is enforced
-    upstream, in the prompt itself.
-    """
-    prompt = get_system_prompt()
-    for constraint in [
-        "double-quoted",
-        "no trailing commas",
-    ]:
-        assert (
-            constraint in prompt
-        ), f"Strict JSON output constraint missing from system prompt: {constraint}"
-
-
-def test_system_prompt_limits_rule_count():
-    """Verify the template caps rule count at 8 to keep grammars compact and parseable.
-
-    Tracery grammars with too many rules degrade performance and become hard to debug;
-    the limit is enforced explicitly in the system prompt before generation begins.
-    """
-    prompt = get_system_prompt()
-    assert "at most 8 rules" in prompt, (
-        "Rule count cap missing from system prompt — grammars could balloon unbounded"
-    )
-
-
-def test_system_prompt_enforces_no_negative_prompt():
-    """Verify the template explicitly forbids negative prompts for ERNIE.
-
-    ERNIE-Image-Turbo has no negative-prompt input, so exclusions must be stated
-    concretely in the positive prompt itself. This guardrail prevents models from
-    emitting invalid negative-prompt syntax into expanded prompts.
-    """
-    prompt = get_system_prompt()
-    assert (
-        "no negative-prompt" in prompt
-    ), "ERNIE no-negative-prompt constraint missing from system prompt"
-
-
-def test_system_prompt_enforces_varying_rule_minimum():
-    """Verify the template requires at least one varying rule with 7 alternatives.
-
-    The grammar must have variation to produce diverse outputs; a single-option grammar
-    defeats the purpose of Tracery expansion. The minimum alternative count (7) prevents
-    degenerate grammars that would collapse into identical outputs.
-    """
-    prompt = get_system_prompt()
-    for invariant in [
-        "exactly 7",
-        "distinct, coherent alternatives",
-        "at least one varying rule",
-    ]:
-        assert (
-            invariant in prompt
-        ), f"Varying-rule minimum requirement missing from system prompt: {invariant}"
-
-
-def test_system_prompt_allows_five_or_six_alternatives():
-    """Verify the template documents the 5–6 alternative tolerance clause.
-
-    validate_grammar_structure accepts 5–7 alternatives per varying rule.
-    The template must document that 5–6 is acceptable when 7 genuinely
-    distinct choices would reduce quality; without this escape hatch the
-    model is forced to pad to exactly 7, producing near-duplicate options.
-    """
-    prompt = get_system_prompt()
-    assert "Five or six are acceptable" in prompt, (
-        "5–6 alternative tolerance clause missing from system prompt — "
-        "model would be forced to always emit 7 alternatives even when fewer are better"
-    )
-
-
-def test_system_prompt_requires_concrete_position_vocabulary():
-    """Verify the template mandates concrete spatial language instead of vague placement.
-
-    The model must use explicit directional vocabulary (left/right, foreground/background)
-    rather than loose terms like 'around' or 'nearby'. This ensures spatial descriptions
-    are precise enough for image generation to interpret correctly.
-    """
-    prompt = get_system_prompt()
-    assert "concrete positions" in prompt, "Concrete position requirement missing from system prompt"
-    for direction in ["left/right", "foreground/background"]:
-        assert (
-            direction in prompt
-        ), f"Direction vocabulary requirement missing: {direction}"
-
-
-def test_system_prompt_requires_verbatim_user_constraint_preservation():
-    """Verify the template explicitly requires preserving user constraints verbatim.
-
-    The system prompt must instruct the model to keep every explicit user constraint
-    exactly as provided — only unspecified details should vary. This prevents models from
-    silently dropping or rephrasing hard constraints supplied by the caller.
-    """
-    prompt = get_system_prompt()
-    assert (
-        "Preserve every explicit user constraint verbatim" in prompt
-    ), "Verbatim preservation of user constraints missing from system prompt"
-
-
-def test_system_prompt_example_uses_correct_json_structure():
-    """Verify the template's example grammar demonstrates proper Tracery JSON format.
-
-    The concrete compact example on line 45 shows the expected output structure with
-    an origin rule, varying rules with alternatives, and hash-delimited references.
-    This structural demonstration confirms the format contract is communicated to the model.
-    """
-    prompt = get_system_prompt()
-    # Example must show proper JSON with double-quoted keys/values
-    assert '"origin":[' in prompt or '"origin":[\\' in prompt, (
-        "Example grammar missing origin rule structure"
-    )
-    # Must demonstrate hash-reference format used by Tracery
-    assert "#rule#" in prompt or "#subject#" in prompt or "#details#" in prompt, (
-        "Example grammar not demonstrating hash-reference Tracery format"
-    )
+    assert "Unspecified does not mean fixed or omitted" in prompt
+    assert "Unspecified medium and style must vary" in prompt
+    assert "Only explicit or logically necessary constraints belong in origin" in prompt
+    assert "2–5 meaningful variation groups" in prompt
+    assert "use at most 8 rules total" in prompt
+    assert "Without a requested medium, use an ordinary photograph" not in prompt
+    assert "Do not vary style unless requested" not in prompt
+    assert 'Specific visual direction stays fixed unless the user asks to vary it' in prompt

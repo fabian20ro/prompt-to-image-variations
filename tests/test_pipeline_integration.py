@@ -6,9 +6,6 @@ from unittest.mock import MagicMock, patch
 from pipeline import (
     PipelineExecutor,
     PipelineResult,
-    PipelineConfig,
-    ImageGenerationConfig,
-    EnhancementConfig,
 )
 
 
@@ -242,29 +239,6 @@ def test_run_from_grammar_text_raw_response_saved(tmp_path):
     assert raw_file.read_text() == '{"choices": [{"text": "raw"}]}'
 
 
-def test_pipeline_config_to_dict_serialization():
-    """PipelineConfig.to_dict() should convert all fields correctly."""
-
-    config = PipelineConfig(
-        prompt="test",
-        count=10,
-        prefix="img",
-        temperature=0.8,
-        no_cache=True,
-        image=ImageGenerationConfig(enabled=True, width=1024, height=1024),
-        enhancement=EnhancementConfig(enabled=False),
-    )
-
-    d = config.to_dict()
-    assert d["prompt"] == "test"
-    assert d["count"] == 10
-    assert d["prefix"] == "img"
-    assert d["temperature"] == 0.8
-    assert d["no_cache"] is True
-    assert d["image"]["enabled"] is True
-    assert d["image"]["width"] == 1024
-
-
 def test_run_from_grammar_text_gallery_layout_in_metadata(tmp_path):
     """run_from_grammar_text should store gallery_layout in metadata."""
 
@@ -308,7 +282,7 @@ def test_run_full_pipeline_resume_skips_existing_images(tmp_path):
             success=True, run_id="test", prompt_count=5, image_count=0, skipped_count=5
         )
 
-    with patch("pipeline.generate_grammar", return_value=('{ "root": {"origin": ["a dragon"]}}', False, None)), \
+    with patch("pipeline.generate_grammar", return_value=('{"origin": ["a dragon"]}', False, None)), \
          patch("pipeline.create_gallery"), \
          patch("pipeline.generate_master_index"), \
          patch("pipeline.append_grammar_revision"), \

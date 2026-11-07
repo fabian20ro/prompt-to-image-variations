@@ -6,6 +6,8 @@
 - Grammar generation + cleanup: `tests/test_grammar_generator.py`
 - Tracery runner: `tests/test_tracery_runner.py`
 - Image generation wrapper: `tests/test_image_generator.py`
+- Migration public seams: `tests/test_migration_contract.py` (LM Studio/mflux/process boundaries faked; real expansion/files/pipeline)
+- Opt-in hardware/corpus acceptance: `scripts/verify_flux3.py`; outputs under `generated/verification/`
 - Shared HTML/CSS/JS components: `tests/test_html_components.py`
 - Gallery HTML generation: `tests/test_gallery.py`, `tests/test_gallery_index.py`
 - Gallery service: `tests/test_gallery_service.py`
@@ -21,4 +23,4 @@
 ## Notes
 
 - `tests/test_image_generator.py` runs cleanly under `uv run pytest` in this checkout.
-- The full suite also runs cleanly (`331 passed`).
+- Run `uv run pytest -q` for the current suite; automated tests do not require live LM Studio or Metal.

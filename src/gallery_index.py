@@ -272,8 +272,8 @@ def _build_generation_form() -> str:
           </div>
           <div class="form-group checkbox-group">
             <label>
-              <input type="checkbox" id="tiled_vae" name="tiled_vae">
-              Tiled VAE (memory efficient)
+              <input type="checkbox" id="enhance_tiled_vae" name="enhance_tiled_vae">
+              SeedVR2 tiled VAE (enhancement only)
             </label>
           </div>
         </div>
@@ -325,11 +325,11 @@ def _build_generation_form() -> str:
         <div class="form-row">
           <div class="form-group">
             <label for="grammar_width">Width</label>
-            <input type="number" id="grammar_width" name="width" value="864" step="8">
+            <input type="number" id="grammar_width" name="width" value="864" step="16">
           </div>
           <div class="form-group">
             <label for="grammar_height">Height</label>
-            <input type="number" id="grammar_height" name="height" value="1152" step="8">
+            <input type="number" id="grammar_height" name="height" value="1152" step="16">
           </div>
           <div class="form-group">
             <label for="grammar_seed">Seed</label>
@@ -543,7 +543,7 @@ document.addEventListener('DOMContentLoaded', function() {{
       count: parseInt(formData.get('count')) || 50,
       temperature: parseFloat(formData.get('temperature')) || 0.7,
       no_cache: form.querySelector('#no_cache')?.checked || false,
-      tiled_vae: form.querySelector('#tiled_vae')?.checked ?? false,
+      enhance_tiled_vae: form.querySelector('#enhance_tiled_vae')?.checked ?? false,
     }};
 
     // Show status immediately

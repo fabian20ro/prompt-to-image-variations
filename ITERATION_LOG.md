@@ -58,6 +58,7 @@ Each entry should follow this structure:
 **Insight:** For this repo’s current flat-import layout, `uv` works cleanly with `tool.uv.package = false`; switching to package/module entrypoints would be a separate refactor.
 **Promoted to Lessons Learned:** Yes
 
+
 ---
 
 ### [2026-02-24] AI Agent Configuration Restructuring
@@ -333,6 +334,66 @@ Each entry should follow this structure:
 
 <!-- New entries go above this line, most recent first -->
 
+### [2026-11-06] Audited current state and planned Qwen and FLUX 3 migration
+
+**Context:** User requested current status and a thorough migration plan, not implementation.
+**What happened:** Verified clean committed baseline, 361 passing tests and Ruff; inspected LM Studio inventory (Qwen3.8 Splash loaded, configured Gemma absent), current dependencies, model cache, prompting, validation, and memory lifecycle. Verified FLUX 3 Image Klein support and official prompt guidance. Added `docs/flux3-qwen-migration-plan.md` with phased changes and acceptance gates.
+**Outcome:** Plan prepared. No application changes, downloads, or model unloads. Found a reproducible layout incompatibility: Tracery strips literal bounding-box arrays.
+**Insight:** FLUX layout JSON must be serialized after Tracery expansion, not embedded unescaped inside grammar strings.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Removed ERNIE checkpoint to free disk space
+
+**Context:** User explicitly requested removing ERNIE due to limited disk space.
+**What happened:** Deleted `/Users/fabian/Library/Caches/mflux/models/ernie-image-turbo-4bit` (6.2 GB reported by du) and verified it is absent. No ERNIE-named repositories found in the default Hugging Face hub cache.
+**Outcome:** Checkpoint removed. Application code unchanged; image generation awaits the planned FLUX migration and replacement checkpoint.
+**Promoted to Lessons Learned:** No
+
+### [2026-11-07] Implemented caption-only FLUX 3/Qwen migration with seam-first TDD
+
+**Context:** User approved grammar/expansion, rendering/enhancement, pipeline artifacts, and CLI/API seams; requested Matt Pocock's TDD workflow. Hugging Face terms/login confirmed locally.
+**What happened:** Pinned mflux 0.24.0/Python >=3.11; migrated defaults to Qwen3.8 Splash and saved FLUX 3 Klein q4, 16 steps/no CFG. Rebuilt caption template/example, canvas-aware cache identity, graph validation, literal typography preservation, one bounded repair, and transient-only model-load retries. Added checkpoint/component guards, mandatory LM Studio unload, image-model/allocator handoffs, per-image actual-seed sidecars, consistent renderer provenance, early legacy/creation guards, and enhancement-only VAE controls. Invalid edits now validate before backups/deletion. Browser exercised grammar import, invalid cyclic save, and successful regeneration; fixed prompt-only image totals discovered there.
+**Outcome:** 380 automated tests passing; configured Ruff and diff whitespace checks clean. Real source download/quantization still running; corpus and GPU acceptance deliberately not yet claimed. Browser evidence run: `generated/prompts/20261107_002605_50da405c4032`.
+**Surprises:** Existing normal CLI dropped custom LM Studio URL/canvas; creation-resume could mismatch captions and old PNGs; quote cleanup could mutate valid visible text; Python GC alone did not address MLX allocator cache. Architect review identified these before hardware testing.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Verified saved FLUX q4 checkpoint and tuned against live Qwen corpus
+
+**Context:** Automated seams passed; real-model acceptance remained.
+**What happened:** mflux-save completed the gated source download and persisted q4. Fresh-process 512×512 render succeeded in 25.04s, peak MLX memory 5.875 GB; saved bundle 5,333,800,130 bytes. Recorded source revision `8454017f9ebaada30c998fccd9f67a80c7580f68`. First 24-request Qwen corpus passed 22 structurally/textually; two literal `Batch #1 [OPEN]` requests failed escaping even after repair. Added test-first protection of exact quoted user wording, preserving raw responses. Live samples also motivated scene-level ownership of lighting/background, a revised coherent seven-by-seven example, and quote-preserving cleanup of doubled boundary periods. Removed unused pipeline config types during review (nine dead-type tests removed); current suite count is not directly comparable with the previous snapshot.
+**Outcome:** Checkpoint hardware gate passed. Final tuned corpus and consecutive 1MP/SeedVR2 cycles still pending; intermediate corpus artifacts retained for honest comparison.
+**Promoted to Lessons Learned:** No
+
+### [2026-11-07] Verified full-size enhancement; isolated competing LM Studio reloads
+
+**Context:** User authorized deleting the FLUX source cache after hardware verification, preserving saved q4 and SeedVR2.
+**What happened:** Final corpus accepted 23/24 requests; one portrait grammar correctly failed after bounded repair (four alternatives). Full suite passed 372 tests; configured Ruff scope, dependency compatibility and diff whitespace checks passed. First hardware attempt stalled during tiled SeedVR2 encoding after a long cold download while Qwen had been reloaded. Unloaded it, stopped only our stalled test and retried. Standalone SeedVR2 512→1024 passed in 37.24s. Complete Qwen→FLUX 864×1152→SeedVR2 1728×2304 run passed in 350.35s, 15.926 GB peak MLX, zero active/cache allocation after release; enhanced poster visually checked.
+**Outcome:** Consecutive-cycle acceptance correctly failed because Qwen was loaded again by run end. LM Studio showed an active 61,696-context workload; app requests 8192. Server log confirms a later lms-cli load at 01:20:41 after app unload at 01:16:22. Asked user to pause competing clients; no unrelated processes killed or acceptance checks weakened. Source-cache deletion and offline isolation test remain pending. Added docs/flux3-verification.md with evidence and explicit caveats.
+**Surprise:** An external model reload can invalidate an otherwise correct memory handoff during a multi-minute image operation. The originating client is not established; do not label this as an application auto-reload bug.
+**Promoted to Lessons Learned:** No
+
+### [2026-11-07] Completed consecutive hardware acceptance and approved cache cleanup
+
+**Context:** User paused other LM Studio clients and requested resuming verification, then deleting the FLUX source cache on success.
+**What happened:** First resumed run produced a valid enhanced image in 214.77s but still saw CLI reloads; retained that failed lifecycle evidence. After unloading the remaining model, offline q4 rendering passed in 19.39s with an empty HF cache and no checkpoint symlinks. Two consecutive full Qwen→FLUX q4→SeedVR2 cycles then passed in 157.29s and 290.63s, each producing 1728×2304 at 15.926 GB peak MLX allocation. Both ended with empty LM Studio inventory and zero rounded active/cache MLX memory; both posters visually inspected. Reran automated checks: 372 passed, configured Ruff clean. Deleted only the approved FLUX HF source directory, 19,844,716 KiB (18.9 GiB). Verified saved q4 and SeedVR2 sizes unchanged. A post-deletion offline render passed in 19.48s.
+**Outcome:** Hardware acceptance and cleanup complete. Evidence: generated/verification/flux3-20261107-final-gate/e2e.json and post-cleanup.png. Updated verification report and migration status. Final Qwen corpus caveat remains 23/24 accepted, one correctly rejected after repair. No application changes or commits this iteration.
+**Insight:** An unload command does not prevent another client loading a model later; uninterrupted lifecycle acceptance requires coordination, not weaker checks.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Final two-axis review and commit preparation
+
+**Context:** User requested reviewing the final migration diff and committing it. Reviewed working tree against HEAD 2e4a432, including new plan, evidence, verifier and contract tests.
+**What happened:** Separate Standards and Spec reviewers identified one finding each: doubled backslashes could bypass action validation, and repeated quoted literals could double-escape visible hash text. Reproduced both through approved public seams with failing tests; fixed shared escape-aware graph parsing and single-pass longest-match literal protection, including already-escaped input. Both reviewers independently confirmed resolution. No unrelated refactor or external service changes.
+**Outcome:** 375 tests pass; configured Ruff and diff whitespace checks clean. Replayed all 23 accepted corpus grammars and both hardware grammars successfully. Hardware/model code unchanged; previous GPU acceptance remains applicable. Migration ready for the user-authorized semantic commit, including explicit breaking-change and provenance caveats. No push requested.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Published migration pull request
+
+**Context:** User requested pushing the reviewed migration and creating a PR.
+**What happened:** Refreshed remote refs, confirmed no existing PR for the branch, pushed migration commit aec7146, and opened PR #81 against master with breaking changes, measured verification, and the 23/24 corpus caveat.
+**Outcome:** https://github.com/fabian20ro/prompt-to-image-variations/pull/81. No merge or automatic merge requested. Publication journal recorded in a separate documentation-only commit; application code unchanged.
+**Promoted to Lessons Learned:** No
+
 ### [2026-09-07] Complete gallery progress acceptance coverage
 
 **What happened:** Added regression cases for 3/5 = 60%, rounded 1/3 = 33%, and zero-total progress. The same tests verify progress text, status, escaped image prompt, sibling actions, and untouched cards.
@@ -373,3 +434,32 @@ worker/Discord evidence kept separately in the Hermes maintenance audit.
 **Insight:** Optional string presence is a type check, not a truthiness check. Read
 raw metadata before producer defaults can erase the distinction between absent and empty.
 **Promoted to Lessons Learned:** No; explicit zero-value preservation already documented.
+
+### [2026-11-07] Resolved PR #81 conflicts with master and verified merged suite
+
+**Context:** User requested resolving conflicts with master, running tests and pushing fixes to the existing PR. Merged origin/master at 74adfd0 without rewriting published migration history.
+**What happened:** Preserved both journal branches and combined master CLI listing/JSON/config, seeded Tracery, configuration/path validation, worker/gallery fixes and compatible coverage with the FLUX q4 migration. Kept neutral model paths, current runtime kwargs, strict grammar validation, sidecars and memory handoffs. Did not restore dead pipeline config exports or unsupported SeedVR2 width/height overrides. Adapted inherited tests to FLUX semantics; retained their compatible coverage and replaced private ERNIE-cache checks with public renderer behavior. Real Click progress-bar integration exposed an unsupported write method; regression observed red, corrected to click.echo, then green. Separate source integration review found no remaining merge errors. Clarified the web worker's separate 30-minute task deadline versus configurable liveness checks.
+**Outcome:** 1118 tests pass on Python 3.11.16 and 3.13.15 in separate locked environments without optional image packages; Ruff, lock consistency, dependency compatibility and whitespace checks pass. All 23 accepted corpus grammars and both saved hardware grammars replay successfully. No new real GPU inference or model/cache changes this iteration; prior hardware measurements remain explicitly historical. Prepared semantic merge commit for PR #81; push and GitHub conflict-state verification follow.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Expanded open creative axes in the Qwen grammar instructions
+
+**Context:** User cannot spare memory for SeedVR2 and redirected work to richer prompt expansion. Confirmed unspecified medium/style must vary too, not default to photography.
+**What happened:** Two red→green slices at the previously approved grammar/expansion seam. First replaced the narrow photographic example with four independently recombinable seven-choice groups: medium/treatment, layout/viewpoint/typography, vessel appearance, setting/light. Then changed policy to separate explicit/necessary constraints from open creative choices, use 2–5 meaningful groups within the existing eight-rule limit, consider relevant subject/context/composition traits, and bundle dependent choices without freezing unrelated traits. Kept exact text, fixed subject/count, seven-preferred/five-minimum choices, readable captions and strict Tracery validation. User-authorized medium exploration intentionally differs from the upstream upsampler's photography default. Template content already participates in cache identity; no cache deletion, schema/runtime or model changes needed.
+**Outcome:** 1120 tests pass on the clean Python 3.13 environment, Ruff and whitespace checks clean. Exhaustively expanded all 2401 example combinations; each retains the exact headline and single closed ceramic canister, without unresolved markers or double periods. Captions are 90–106 words (not padded to the typical range). No live Qwen/image inference, model loading, downloads or enhancement. Actual Qwen adherence and perceptual diversity remain unmeasured; no commit or push requested this iteration.
+**Insight:** An example must demonstrate the desired exploration, not silently lock invented medium, viewpoint or palette in origin. Constraints introduced by the expander are not automatically user constraints.
+**Promoted to Lessons Learned:** Yes
+
+### [2026-11-07] Prepared separate prompt-expansion pull request
+
+**Context:** User requested a PR for the broader creative-axis changes. Migration PR #81 remains open.
+**What happened:** Created codex/expand-qwen-creative-axes from the verified migration head, with codex/add-ernie-image-support as the intended PR base so only the six prompt/test/documentation files appear in the new diff. Reran the full suite and configured Ruff before publication. No model inference, loads or downloads.
+**Outcome:** Separate stacked PR prepared; migration must merge before the follow-up can target master. Changes preserve explicit constraints while varying relevant unspecified traits, including medium/style. Live Qwen quality remains unmeasured; no model/runtime changes included.
+**Promoted to Lessons Learned:** No
+
+### [2026-11-08] Reconciled PR #81 with newly merged dependency updates
+
+**Context:** User merged PR #82 into PR #81's branch and newer PRs into master, then requested resolving the new conflict so #81 can merge.
+**What happened:** Fast-forwarded the local migration branch to the PR #82 merge, then merged master at 82e4fbc. Only uv.lock conflicted; the new LM Studio timeout environment test merged cleanly. Used the migration's valid generated lock as the resolver baseline and applied master's newer pytest 9.0.3, idna 3.15, setuptools 83.0.0, Starlette 1.3.1 and Transformers 5.10.1. Retained mflux 0.24.0 and already-newer Pillow, Torch and urllib3 versions rather than downgrading the FLUX runtime or restoring unused old transitive dependencies. No application or prompt edits.
+**Outcome:** 1121 tests pass on Python 3.11.16 and 3.13.15 in locked non-image environments. Ruff, uv lock consistency, dependency checks and whitespace checks pass; optional image sync dry-run resolves the expected five library updates. Two upstream test-client deprecation warnings remain. Existing image environment unchanged; no model loads, downloads, inference or hardware re-verification. Prepared merge commit for the existing PR, without merging the PR itself.
+**Promoted to Lessons Learned:** No

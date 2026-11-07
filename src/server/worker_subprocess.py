@@ -162,14 +162,14 @@ def run_generate_pipeline(params: dict):
     height = params.get("height", 1152)
     seed = params.get("seed")
     max_prompts = params.get("max_prompts")
-    tiled_vae = params.get("tiled_vae", False)
+    enhance_tiled_vae = params.get("enhance_tiled_vae", False)
     enhance = params.get("enhance", False)
     enhance_softness = params.get("enhance_softness", 0.5)
     enhance_after = params.get("enhance_after", False)
 
     # Precompute output directory so logs include full pipeline execution.
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_output_dir = paths.prompts_dir / f"{run_timestamp}_{hash_prompt(prompt)}"
+    run_output_dir = paths.prompts_dir / f"{run_timestamp}_{hash_prompt(prompt, width, height, temperature)}"
     set_log_file(run_output_dir / f"{prefix}_worker.log")
     log_to_file(f"Starting generation pipeline for: {prompt[:100]}...")
 
@@ -188,7 +188,7 @@ def run_generate_pipeline(params: dict):
             height=height,
             seed=seed,
             max_prompts=max_prompts,
-            tiled_vae=tiled_vae,
+            enhance_tiled_vae=enhance_tiled_vae,
             enhance=enhance,
             enhance_softness=enhance_softness,
             enhance_after=enhance_after,

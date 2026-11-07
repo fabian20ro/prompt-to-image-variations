@@ -10,9 +10,6 @@ from conftest import create_run_files
 from pipeline import (
     PipelineExecutor,
     PipelineResult,
-    PipelineConfig,
-    ImageGenerationConfig,
-    EnhancementConfig,
 )
 
 
@@ -38,135 +35,6 @@ class TestPipelineResult:
         assert result.run_id is None
 
 
-class TestImageGenerationConfig:
-    """Tests for ImageGenerationConfig dataclass."""
-
-    def test_default_values(self):
-        """Test default configuration values."""
-        config = ImageGenerationConfig()
-        assert config.enabled is False
-        assert config.images_per_prompt == 1
-        assert config.width == 864
-        assert config.height == 1152
-        assert config.seed is None
-        assert config.tiled_vae is False
-        assert config.resume is False
-
-    def test_custom_values(self):
-        """Test custom configuration values."""
-        config = ImageGenerationConfig(
-            enabled=True,
-            width=1024,
-            height=1024,
-            seed=42,
-        )
-        assert config.enabled is True
-        assert config.width == 1024
-        assert config.seed == 42
-
-    def test_to_dict(self):
-        """Test conversion to dictionary."""
-        config = ImageGenerationConfig(
-            enabled=True,
-            width=1024,
-            height=768,
-        )
-        result = config.to_dict()
-        assert result["enabled"] is True
-        assert result["width"] == 1024
-        assert result["height"] == 768
-        # Optional fields should not be present if None
-        assert "seed" not in result or result.get("seed") is None
-        assert "max_prompts" not in result  # None by default
-
-    def test_to_dict_excludes_none_optionals(self):
-        """Test that None optional values are excluded from dict."""
-        config = ImageGenerationConfig()
-        result = config.to_dict()
-        assert "seed" not in result  # None by default
-        assert "max_prompts" not in result  # None by default
-
-    def test_to_dict_includes_non_none_optionals(self):
-        """Non-None optionals must be serialized into the dict with their values.
-
-        Complements test_to_dict_excludes_none_optionals: it exercises the
-        *inclusion* branch of the ``if self.seed is not None`` condition.
-        A regression that typo'd the key, coerced the type, or stored the
-        wrong value in that branch would still pass the None-exclusion tests
-        but is caught here.
-        """
-        config = ImageGenerationConfig(enabled=True, width=1024, height=768, seed=7, max_prompts=2)
-        result = config.to_dict()
-        assert result["seed"] == 7
-        assert result["max_prompts"] == 2
-
-
-class TestEnhancementConfig:
-    """Tests for EnhancementConfig dataclass."""
-
-    def test_default_values(self):
-        """Test default configuration values."""
-        config = EnhancementConfig()
-        assert config.enabled is False
-        assert config.softness == 0.5
-        assert config.batch_after is False
-
-    def test_custom_values(self):
-        """Test custom configuration values."""
-        config = EnhancementConfig(
-            enabled=True,
-            softness=0.3,
-            batch_after=True,
-        )
-        assert config.enabled is True
-        assert config.softness == 0.3
-        assert config.batch_after is True
-
-    def test_to_dict(self):
-        """Test conversion to dictionary."""
-        config = EnhancementConfig(enabled=True, softness=0.7)
-        result = config.to_dict()
-        assert result["enabled"] is True
-        assert result["softness"] == 0.7
-        assert result["batch_after"] is False
-
-
-class TestPipelineConfig:
-    """Tests for PipelineConfig dataclass."""
-
-    def test_default_values(self):
-        """Test default configuration values."""
-        config = PipelineConfig()
-        assert config.prompt == ""
-        assert config.count == 50
-        assert config.prefix == "image"
-        assert config.temperature == 0.7
-        assert config.no_cache is False
-        assert isinstance(config.image, ImageGenerationConfig)
-        assert isinstance(config.enhancement, EnhancementConfig)
-
-    def test_custom_values(self):
-        """Test custom configuration values."""
-        config = PipelineConfig(
-            prompt="a dragon flying",
-            count=100,
-            prefix="dragon",
-            image=ImageGenerationConfig(enabled=True, width=1024),
-            enhancement=EnhancementConfig(enabled=True),
-        )
-        assert config.prompt == "a dragon flying"
-        assert config.count == 100
-        assert config.image.enabled is True
-        assert config.image.width == 1024
-        assert config.enhancement.enabled is True
-
-    def test_to_dict_output_dir(self):
-        """PipelineConfig.to_dict() must serialize output_dir as str and omit it when None."""
-        config = PipelineConfig(output_dir=Path("/tmp/out"))
-        # A Path is serialized to its string form so the dict stays JSON-serializable.
-        assert config.to_dict()["output_dir"] == "/tmp/out"
-        # Documented None-exclusion: an unset output_dir must be omitted, not stored as null.
-        assert "output_dir" not in PipelineConfig().to_dict()
 
 class TestPipelineExecutorInit:
     """Tests for PipelineExecutor initialization."""
@@ -522,14 +390,14 @@ class TestRunFromGrammarText:
     @patch("pipeline.run_tracery")
     @patch("pipeline.create_gallery")
     @patch("pipeline.generate_master_index")
-    def test_tiled_vae_value_persisted_to_metadata(self, mock_index, mock_gallery, mock_tracery, temp_dir):
-        """The configured tiled_vae value must be persisted into the metadata block.
+    def test_enhance_tiled_vae_value_persisted_to_metadata(self, mock_index, mock_gallery, mock_tracery, temp_dir):
+        """The configured enhance_tiled_vae value must be persisted into the metadata block.
 
-        run_from_grammar_text writes tiled_vae into the image_generation block, and
+        run_from_grammar_text writes enhance_tiled_vae into the image_generation block, and
         downstream regenerate_image / enhance_images read it back via
-        image_settings.get("tiled_vae", True). The reader's default is True, so if
+        image_settings.get("enhance_tiled_vae", True). The reader's default is True, so if
         the writer drops or renames the key, a user who explicitly chose
-        tiled_vae=False would be silently re-run with tiling enabled — a
+        enhance_tiled_vae=False would be silently re-run with tiling enabled — a
         success=True result never surfaces that corruption. Pinning the non-default
         False value keeps the assertion load-bearing: it fails on both a missing key
         and a flipped value, which no "success" assertion would catch.
@@ -548,14 +416,14 @@ class TestRunFromGrammarText:
                 count=1,
                 prefix="tv",
                 generate_images=False,
-                tiled_vae=False,
+                enhance_tiled_vae=False,
             )
 
         assert result.success is True
         meta_file = result.output_dir / "tv.metaprompt.json"
         with open(meta_file) as f:
             meta_content = json.load(f)
-        assert meta_content["image_generation"]["tiled_vae"] is False
+        assert meta_content["image_generation"]["enhance_tiled_vae"] is False
 
 
 class TestRunFromGrammar:
@@ -687,7 +555,7 @@ class TestRunFullPipelineWithImages:
         assert captured_kwargs["height"] == 768
         assert captured_kwargs["seed"] == 42
         assert captured_kwargs["images_per_prompt"] == 1
-        assert captured_kwargs["tiled_vae"] is True
+        assert captured_kwargs["enhance_tiled_vae"] is True
         assert captured_kwargs["enhance"] is False
         # Verify prompt files were created with numbered naming convention: {prefix}_{i}.txt
         expected_files = [result.output_dir / f"dragon_{i}.txt" for i in range(2)]

@@ -776,6 +776,8 @@ class TestCliEnhanceImages:
             base_url="http://localhost:1234/v1",
             use_cache=True,
             temperature=0.7,
+            width=864,
+            height=1152,
         )
         mock_executor_cls.assert_not_called()
 
@@ -1389,7 +1391,7 @@ class TestDumpConfigFlag:
         runner = CliRunner()
         result = runner.invoke(main, ["--dump-config"])
         assert result.exit_code == 0
-        assert "ERNIE-Image-Turbo CLI Settings" in result.output
+        assert "FLUX 3 Image Klein CLI Settings" in result.output
 
     def test_dump_config_shows_all_sections(self):
         """Test that --dump-config prints all four config sections."""
@@ -1421,7 +1423,7 @@ class TestDumpConfigFlag:
             "--dump-config", "-p", "a cat", "-n", "5"
         ])
         assert result.exit_code == 0
-        assert "ERNIE-Image-Turbo CLI Settings" in result.output
+        assert "FLUX 3 Image Klein CLI Settings" in result.output
         # No pipeline output should appear
         assert "Generating grammar for:" not in result.output
 
@@ -1438,7 +1440,7 @@ class TestDumpConfigFlag:
         result = runner.invoke(main, ["--dump-config", "--quiet"])
         assert result.exit_code == 0
         # Settings block should not appear in output when quiet is on
-        assert "ERNIE-Image-Turbo CLI Settings" not in result.output
+        assert "FLUX 3 Image Klein CLI Settings" not in result.output
 
     def test_print_settings_quiet_silent(self, capsys):
         """Test that _print_settings with quiet=True prints nothing."""
@@ -1452,4 +1454,4 @@ class TestDumpConfigFlag:
         from cli import _print_settings
         _print_settings(quiet=False)
         captured = capsys.readouterr()
-        assert "ERNIE-Image-Turbo CLI Settings" in captured.out
+        assert "FLUX 3 Image Klein CLI Settings" in captured.out

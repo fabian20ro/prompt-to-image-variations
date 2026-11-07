@@ -1,6 +1,8 @@
 """SeedVR2 image enhancement using mflux (MLX-based for Apple Silicon)."""
 
 import random
+import sys
+import gc
 from pathlib import Path
 
 from lm_studio import unload_all_models
@@ -14,8 +16,9 @@ def clear_enhancer_cache():
     """Clear the enhancer cache and free memory."""
     global _enhancer_cache
     _enhancer_cache.clear()
-    import gc
     gc.collect()
+    if mx := sys.modules.get("mlx.core"):
+        mx.clear_cache()
 
 
 def enhancer_is_loaded(tiled_vae: bool = False) -> bool:
@@ -34,6 +37,7 @@ def _get_enhancer(tiled_vae: bool = False):
     cache_key = tiled_vae
     if cache_key in _enhancer_cache:
         return _enhancer_cache[cache_key]
+    clear_enhancer_cache()
 
     try:
         from mflux.models.seedvr2.variants.upscale.seedvr2 import SeedVR2
@@ -60,8 +64,6 @@ def enhance_image(
     softness: float = 0.5,
     seed: int | None = None,
     tiled_vae: bool = False,
-    width: int | None = None,
-    height: int | None = None,
 ) -> Path:
     """
     Enhance a single image using SeedVR2 2x upscaling.
@@ -72,8 +74,6 @@ def enhance_image(
         softness: Enhancement softness (0.0-1.0, default 0.5)
         seed: Random seed for reproducibility (None for random)
         tiled_vae: Enable tiled VAE decoding to reduce memory (default: False)
-        width: Override output width in pixels (must be positive multiple of 8; None = model default)
-        height: Override output height in pixels (must be positive multiple of 8; None = model default)
 
     Returns:
         Path to the enhanced image file
@@ -88,23 +88,8 @@ def enhance_image(
     if not (0.0 <= softness <= 1.0):
         raise ValueError("softness must be between 0.0 and 1.0")
 
-    MAX_DIMENSION = 16384
-
-    if width is not None:
-        if width <= 0:
-            raise ValueError("Width must be positive.")
-        if width > MAX_DIMENSION:
-            raise ValueError(f"Width must not exceed {MAX_DIMENSION}.")
-        if width % 8 != 0:
-            raise ValueError("Width must be a multiple of 8.")
-
-    if height is not None:
-        if height <= 0:
-            raise ValueError("Height must be positive.")
-        if height > MAX_DIMENSION:
-            raise ValueError(f"Height must not exceed {MAX_DIMENSION}.")
-        if height % 8 != 0:
-            raise ValueError("Height must be a multiple of 8.")
+    from image_generator import clear_model_cache
+    clear_model_cache()
 
     # Import ScaleFactor for 2x upscaling
     try:
@@ -127,17 +112,12 @@ def enhance_image(
     enhancer = _get_enhancer(tiled_vae)
 
     # Enhance the image with 2x upscaling
-    kwargs = dict(
+    result = enhancer.generate_image(
         seed=seed,
         image_path=str(image_path),
         resolution=ScaleFactor(2),
         softness=softness,
     )
-    if width is not None:
-        kwargs["width"] = width
-    if height is not None:
-        kwargs["height"] = height
-    result = enhancer.generate_image(**kwargs)
 
     # Save the enhanced image (overwrite if replacing original)
     result.save(path=str(output_path), overwrite=True)

@@ -105,7 +105,7 @@ def test_cache_full_integrity(tmp_path, monkeypatch):
     metadata = json.loads(metadata_file.read_text())
     assert metadata["user_prompt"] == user_prompt
     assert metadata["hash"] == prompt_hash
-    assert metadata["prompt_schema"] == "ernie-v2"
+    assert metadata["prompt_schema"] == "flux3-caption-v1"
     assert metadata["lm_model"] == settings.lm_studio.model
     assert "created_at" in metadata
 
@@ -530,7 +530,7 @@ def test_get_cached_grammar_independent_of_raw_file(tmp_path, monkeypatch):
     monkeypatch.setattr("src.grammar_generator.CACHE_DIR", mock_cache_dir)
 
     prompt_hash = "partial_state_test"
-    grammar_content = '{"origin": ["#a#", "x"], "a": ["1"]}'
+    grammar_content = '{"origin": ["#a#"], "a": ["1", "2", "3", "4", "5"]}'
     raw_response = '```json\n' + grammar_content + '\n```'
     user_prompt = "test"
 
@@ -565,7 +565,7 @@ def test_generate_grammar_returns_grammar_on_partial_state_hit(tmp_path, monkeyp
 
     user_prompt = "partial_state_happy_test"
     prompt_hash = hash_prompt(user_prompt)
-    grammar_content = '{"origin": ["#a#", "x"], "a": ["1"]}'
+    grammar_content = '{"origin": ["#a#"], "a": ["1", "2", "3", "4", "5"]}'
     raw_response = '```json\n' + grammar_content + '\n```'
 
     # Write all files then delete raw to simulate crash state
@@ -777,7 +777,7 @@ def test_generate_grammar_returns_cached_without_http_call(tmp_path, monkeypatch
     monkeypatch.setattr("src.grammar_generator.CACHE_DIR", mock_cache_dir)
 
     user_prompt = "a cat riding a unicycle"
-    grammar_content = '{"origin": ["#a#", "2"], "a": ["1"]}'
+    grammar_content = '{"origin": ["#a#"], "a": ["1", "2", "3", "4", "5"]}'
 
     # Write the grammar directly into cache (simulates prior generation)
     prompt_hash = hash_prompt(user_prompt)
@@ -1139,7 +1139,7 @@ def test_generate_grammar_cache_miss_invalid_json_raises(tmp_path, monkeypatch):
         mock_post.return_value = mock_response
 
         with patch("src.grammar_generator.ensure_lm_model_loaded"):
-            with pytest.raises(ValueError, match="invalid JSON grammar after cleaning"):
+            with pytest.raises(ValueError, match="Invalid grammar after one repair"):
                 generate_grammar(user_prompt=user_prompt, use_cache=True)
 
     # No cache file should be left behind for a failed generation — the cache must remain clean
@@ -1316,7 +1316,7 @@ def test_generate_grammar_raises_on_empty_output(tmp_path, monkeypatch):
         mock_post.return_value = mock_response
 
         with patch("src.grammar_generator.ensure_lm_model_loaded"):
-            with pytest.raises(ValueError, match="LM Studio returned no message content"):
+            with pytest.raises(ValueError, match="Invalid grammar after one repair"):
                 generate_grammar(user_prompt=user_prompt, use_cache=True)
 
     # No cache file should be written — the error must prevent caching
@@ -1523,21 +1523,14 @@ def test_validate_grammar_structure_boundary_eight_rules():
     validate_grammar_structure(eight_rules)
 
 
-def test_validate_grammar_structure_reference_to_origin_passes():
-    """validate_grammar_structure must accept grammar that references 'origin' itself.
-
-    The reference checker collects all '#name#' references and ensures they exist as
-    keys in the grammar dict. Since 'origin' is always a key, self-references should
-    pass validation without raising. This guards against regressions where the
-    reference check incorrectly treats 'origin' as missing (e.g., if the regex
-    excludes it or the set-difference logic changes).
-    """
+def test_validate_grammar_structure_reference_to_origin_rejected_as_cycle():
+    """Self-reference is a cycle even though the referenced rule exists."""
     grammar_with_self_ref = {
-        "origin": ["#a#", "#origin#", "2", "3", "4"],  # self-reference
+        "origin": ["#a#", "#origin#", "2", "3", "4"],
         "a": ["hello world"],
     }
-    # Should not raise — 'origin' is a valid key in the grammar
-    validate_grammar_structure(grammar_with_self_ref)
+    with pytest.raises(ValueError, match="cycle"):
+        validate_grammar_structure(grammar_with_self_ref)
 
 
 def test_clean_grammar_output_code_fence_with_language_then_brace():
