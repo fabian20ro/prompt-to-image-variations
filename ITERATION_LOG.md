@@ -456,3 +456,10 @@ raw metadata before producer defaults can erase the distinction between absent a
 **What happened:** Created codex/expand-qwen-creative-axes from the verified migration head, with codex/add-ernie-image-support as the intended PR base so only the six prompt/test/documentation files appear in the new diff. Reran the full suite and configured Ruff before publication. No model inference, loads or downloads.
 **Outcome:** Separate stacked PR prepared; migration must merge before the follow-up can target master. Changes preserve explicit constraints while varying relevant unspecified traits, including medium/style. Live Qwen quality remains unmeasured; no model/runtime changes included.
 **Promoted to Lessons Learned:** No
+
+### [2026-11-08] Reconciled PR #81 with newly merged dependency updates
+
+**Context:** User merged PR #82 into PR #81's branch and newer PRs into master, then requested resolving the new conflict so #81 can merge.
+**What happened:** Fast-forwarded the local migration branch to the PR #82 merge, then merged master at 82e4fbc. Only uv.lock conflicted; the new LM Studio timeout environment test merged cleanly. Used the migration's valid generated lock as the resolver baseline and applied master's newer pytest 9.0.3, idna 3.15, setuptools 83.0.0, Starlette 1.3.1 and Transformers 5.10.1. Retained mflux 0.24.0 and already-newer Pillow, Torch and urllib3 versions rather than downgrading the FLUX runtime or restoring unused old transitive dependencies. No application or prompt edits.
+**Outcome:** 1121 tests pass on Python 3.11.16 and 3.13.15 in locked non-image environments. Ruff, uv lock consistency, dependency checks and whitespace checks pass; optional image sync dry-run resolves the expected five library updates. Two upstream test-client deprecation warnings remain. Existing image environment unchanged; no model loads, downloads, inference or hardware re-verification. Prepared merge commit for the existing PR, without merging the PR itself.
+**Promoted to Lessons Learned:** No

@@ -167,6 +167,26 @@ class TestConfig:
         with pytest.raises(ValueError, match="timeout must be positive"):
             LMStudioConfig(timeout=-1)
 
+    def test_invalid_lm_studio_timeout_env_var_raises(self):
+        """Test that a non-positive LM Studio timeout env var raises ValueError via Settings.from_env().
+
+        PROMPT_GEN_LM_STUDIO_TIMEOUT is read with negative_allowed=True, so a numeric
+        zero or negative value passes the env layer and reaches the intentional
+        LMStudioConfig.__post_init__ validation. test_invalid_lm_studio_timeouts covers
+        direct construction only; this pins the same contract on the production load
+        path, mirroring the via-env raise pattern of test_zero_width_via_enhancement_config.
+        Catches a regression that silently accepted (or fell back from) an invalid
+        timeout through from_env(), letting a non-positive timeout reach LM Studio calls.
+        """
+        from config import Settings
+
+        with patch.dict(os.environ, {"PROMPT_GEN_LM_STUDIO_TIMEOUT": "0"}):
+            with pytest.raises(ValueError, match="timeout must be positive"):
+                Settings.from_env()
+        with patch.dict(os.environ, {"PROMPT_GEN_LM_STUDIO_TIMEOUT": "-5"}):
+            with pytest.raises(ValueError, match="timeout must be positive"):
+                Settings.from_env()
+
     def test_invalid_image_dimensions(self):
         """Test that invalid image dimensions raise ValueError."""
         with pytest.raises(ValueError, match="default_width must be positive"):
