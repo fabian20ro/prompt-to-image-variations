@@ -31,6 +31,8 @@ move it to the Archive section at the bottom with a date and reason.
 
 ## Code Patterns & Pitfalls
 
+**[2026-11-07]** Separate requested constraints from invented defaults in prompt examples — Fixing an unrequested medium/viewpoint/palette in origin removes those axes from every expansion. Keep relevant unspecified traits variable, including medium/style per user preference; bundle dependencies but leave independent groups recombinable. Example combination checks prove structural variation, not live LLM adherence or image quality.
+
 **[2026-11-07]** Resolve API-version conflicts against the pinned runtime — mflux 0.24.0 SeedVR2 accepts `resolution`, not separate `width`/`height` kwargs. Preserve the fixed 2× contract when merging older generic controls. Exercise real Click progress bars at the CLI seam: Click's `ProgressBar` has no `write` method; emit status with `click.echo`.
 
 **[2026-11-07]** Match Tracery escape semantics once — A backslash escapes the next character, including another backslash. Regexes that merely ignore delimiters preceded by a backslash can admit active actions or miss cycles. Share one escape-aware reference graph; protect quoted literals in one longest-match pass so repeated/already-escaped text is not escaped again. Public grammar/expansion regressions cover both.
