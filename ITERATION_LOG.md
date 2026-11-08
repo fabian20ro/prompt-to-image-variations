@@ -509,3 +509,10 @@ raw metadata before producer defaults can erase the distinction between absent a
 **What happened:** Saved the two local documentation updates in an identified stash. Created a non-tracking recovery branch at current master, reverted only c8d174b as ordinary commit 2cf6b58, verified its tree exactly matches pre-push 601d87e, and explicitly pushed `HEAD:refs/heads/master`. Remote master verified at 2cf6b58. Created non-tracking `codex/fix-generation-memory-and-worker` from the revert and reapplied the original fixes as d504ac8; verified its tree exactly matches the tested original. Restored the saved journal/lesson updates without conflicts. Pushed using the full fixes-branch destination and verified both actual remote heads and the branch's own upstream before creating the PR.
 **Outcome:** https://github.com/fabian20ro/prompt-to-image-variations/pull/85 targets master and is mergeable, with CI/CodeQL initially queued. Full suites rerun after reapplication: 1138 passed on Python 3.11.16 and 3.13.15; configured Ruff and whitespace checks clean, same two upstream deprecation warnings. Publication-error and recovery notes retained in a documentation follow-up commit on the PR branch. No force-push, history rewrite, PR merge, model loads, inference, environment/cache changes or app restart. Native long-batch memory stability remains unverified.
 **Promoted to Lessons Learned:** Yes; explicit-destination and non-tracking-branch workflow validated.
+
+### [2026-11-08] Added always-visible push-destination hint
+
+**Context:** User requested a short hint preventing accidental direct master pushes.
+**What happened:** Added one actionable Git-push constraint to AGENTS.md: PR pushes use an explicit feature-branch destination, while master pushes require an explicit request. Detailed incident and recovery guidance remain in LESSONS_LEARNED.md; no Git configuration or hooks changed.
+**Outcome:** Documentation-only change; whitespace check passed. No tests needed, commit or push performed.
+**Promoted to Lessons Learned:** No; existing validated push-safety lesson already covers the incident.
