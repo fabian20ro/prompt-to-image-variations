@@ -12,6 +12,7 @@
 - **Python environment:** Use `uv run ...`; sync deps with `uv sync --group dev`, add `--extra images` for mflux.
 - **LM Studio** must be running at `http://localhost:1234/v1` for grammar generation.
 - **mflux** is required for image generation/enhancement (Apple Silicon only).
+- **Git pushes:** Use `git push -u origin HEAD:refs/heads/<feature-branch>` for PRs; push to `master` only when explicitly requested.
 
 ## Legacy & Deprecated
 
