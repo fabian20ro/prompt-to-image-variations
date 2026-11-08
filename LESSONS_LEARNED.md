@@ -79,6 +79,8 @@ move it to the Archive section at the bottom with a date and reason.
 
 ## Process & Workflow
 
+**[2026-11-08]** Always name the remote destination when publishing a fresh branch — This repo uses `push.default=upstream`; a branch created from `origin/master` inherits master as its upstream. A source-only `git push -u origin <branch>` unexpectedly updated master. Create review branches with `--no-track`, publish with an explicit refspec such as `git push -u origin HEAD:refs/heads/<branch>`, then verify the remote ref and tracking destination before creating a PR. Repair an accidental master update with a user-approved ordinary revert, not a history rewrite; reapply the fixes after that revert so the PR has a real diff.
+
 **[2026-02-07]** Emit queue state updates after clear - Emit `queue_updated` together with `queue_cleared` so existing SSE clients refresh immediately.
 **[2026-02-07]** Prefer non-blocking UI confirmations - Replacing `alert/confirm` with toast/modal flows reduces disruptive UI pauses and improves task continuity.
 
