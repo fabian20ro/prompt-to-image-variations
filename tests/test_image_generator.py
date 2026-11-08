@@ -3,6 +3,7 @@
 from dataclasses import replace
 import json
 import sys
+import weakref
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -30,13 +31,27 @@ def renderer(monkeypatch, tmp_path):
         (checkpoint / "text_encoder" / name).write_text("{}")
     monkeypatch.setattr(settings, "image_generation", replace(settings.image_generation,
                        model_path=checkpoint, default_width=256, default_height=256))
-    calls = []
+    class RenderCalls(list):
+        pass
+    calls = RenderCalls()
+    embeddings = weakref.WeakValueDictionary()
+    model_loads = []
+    class Embedding:
+        pass
     class Flux:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            self.prompt_cache = {}
+            model_loads.append(self)
         def generate_image(self, **kwargs):
+            prompt = kwargs["prompt"]
+            if prompt not in self.prompt_cache:
+                self.prompt_cache[prompt] = Embedding()
+                embeddings[prompt] = self.prompt_cache[prompt]
             calls.append(kwargs)
             return SimpleNamespace(save=lambda **save: Image.new("RGB", (kwargs["width"], kwargs["height"])).save(save["path"]))
+    calls.embeddings = embeddings
+    calls.model_loads = model_loads
     monkeypatch.setitem(sys.modules, "mlx.core", SimpleNamespace(clear_cache=lambda: None))
     monkeypatch.setitem(sys.modules, "mflux.models.common.config", SimpleNamespace(
         ModelConfig=SimpleNamespace(flux3_image_klein=lambda: "distilled")))
@@ -95,3 +110,42 @@ def test_generate_image_random_seed_uses_full_uint32_range(renderer, tmp_path, m
     random.assert_called_once_with(0, 2**32 - 1)
     assert json.loads(output.with_suffix(".generation.json").read_text())["seed"] == 123
     assert renderer[0][0]["prompt"] == ""
+
+
+def test_distinct_prompts_release_old_embeddings_without_reloading_weights(renderer, tmp_path):
+    calls, _ = renderer
+    for index, prompt in enumerate(("Cup", "Fox", "Mountain")):
+        generate_image(prompt, tmp_path / f"image-{index}.png", seed=42)
+        assert set(calls.embeddings) == {prompt}
+    assert len(calls.model_loads) == 1
+
+
+def test_failed_save_releases_prompt_embeddings_and_preserves_error(renderer, tmp_path):
+    output = tmp_path / "image.png"
+    output.mkdir()
+    with pytest.raises(IsADirectoryError):
+        generate_image("Cup", output, seed=42)
+    assert not renderer[0].embeddings
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_generation_logs_memory_before_and_after_each_image(renderer, tmp_path, monkeypatch, capsys, fail):
+    mx = sys.modules["mlx.core"]
+    monkeypatch.setattr(mx, "get_active_memory", lambda: 1024, raising=False)
+    monkeypatch.setattr(mx, "get_cache_memory", lambda: 512, raising=False)
+    monkeypatch.setattr(mx, "get_peak_memory", lambda: 4096, raising=False)
+    output = tmp_path / "image.png"
+    if fail:
+        output.mkdir()
+        with pytest.raises(IsADirectoryError):
+            generate_image("Private prompt, not for diagnostic logs", output, seed=42)
+    else:
+        generate_image("Private prompt, not for diagnostic logs", output, seed=42)
+    records = [json.loads(line.removeprefix("[image-memory] "))
+               for line in capsys.readouterr().err.splitlines() if line.startswith("[image-memory] ")]
+    assert records == [
+        {"operation": "generate", "phase": "before", "image": "image.png",
+         "active_bytes": 1024, "cache_bytes": 512, "process_peak_bytes": 4096},
+        {"operation": "generate", "phase": "failed" if fail else "after", "image": "image.png",
+         "active_bytes": 1024, "cache_bytes": 512, "process_peak_bytes": 4096},
+    ]

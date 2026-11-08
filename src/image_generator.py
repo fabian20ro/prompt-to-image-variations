@@ -9,6 +9,7 @@ from pathlib import Path
 from importlib import metadata
 
 from config import settings
+from image_memory import image_memory
 from lm_studio import unload_all_models
 
 logger = logging.getLogger(__name__)
@@ -132,14 +133,32 @@ def generate_image(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     unload_all_models()
     model = _get_model()
-    image = model.generate_image(
-        seed=seed,
-        prompt=prompt,
-        num_inference_steps=INFERENCE_STEPS,
-        height=height,
-        width=width,
-    )
-    image.save(path=str(output_path), overwrite=True)
+    # mflux retains every distinct prompt indefinitely on a reused model.
+    # Keep only the current embedding, without reloading model weights.
+    prompt_cache = getattr(model, "prompt_cache", {})
+    stale_prompts = [cached for cached in prompt_cache if cached != prompt]
+    for cached in stale_prompts:
+        del prompt_cache[cached]
+    if stale_prompts:
+        gc.collect()
+        if mx := sys.modules.get("mlx.core"):
+            mx.clear_cache()
+    with image_memory("generate", output_path):
+        try:
+            image = model.generate_image(
+                seed=seed,
+                prompt=prompt,
+                num_inference_steps=INFERENCE_STEPS,
+                height=height,
+                width=width,
+            )
+            image.save(path=str(output_path), overwrite=True)
+        except BaseException:
+            prompt_cache.clear()
+            gc.collect()
+            if mx := sys.modules.get("mlx.core"):
+                mx.clear_cache()
+            raise
     output_path.with_suffix(".generation.json").write_text(json.dumps({
         **generation_settings(), "seed": seed, "prompt": prompt,
         "width": width, "height": height,
