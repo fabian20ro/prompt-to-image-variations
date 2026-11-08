@@ -72,10 +72,6 @@ lms unload --all
 
 Image generation fails closed if the CLI is missing, times out, or cannot unload the models. FLUX is released before SeedVR2; image models are released before Qwen. Before an uncached grammar request, the application checks LM Studio's native model inventory and synchronously reloads Qwen by its exact model ID with an 8192-token context. Transient load failures have at most three attempts; invalid configuration is not retried.
 
-Within a batch, FLUX weights stay loaded but only the current prompt's embeddings are retained. Failed inference/image saves clear those embeddings. Other LM Studio clients can still reload Qwen during image work: unloading is not an exclusive memory reservation.
-
-Generation and enhancement stream `[image-memory]` JSON records to stderr before and after each image (or `failed` on an ordinary exception). Records contain the output filename and MLX `active_bytes`, `cache_bytes`, and `process_peak_bytes`, without prompt text. The peak is the process-wide high-water mark, not a reset per-image peak; these are MLX allocations, not total system memory. Native aborts cannot emit the final snapshot. Web workers forward these records to the live log stream.
-
 ## CLI
 
 Generate prompts:
@@ -213,9 +209,7 @@ uv run python scripts/verify_flux3.py --mode corpus
 uv run python scripts/verify_flux3.py --mode e2e
 ```
 
-The corpus generates 12 requests twice; inspect its saved samples for semantic coherence. E2E runs two uncached Qwen → FLUX q4 → SeedVR2 cycles at 864×1152, recording dimensions, memory and LM Studio state. Outputs are in `generated/verification/`. These checks are opt-in and use local inference. Worker heartbeats keep long tasks observable; `PROMPT_GEN_WORKER_TIMEOUT` controls process-polling intervals, not a generation deadline. Web and CLI batches have no overall time limit by default. Cancel stuck work from the queue; heartbeats do not prove useful inference progress. Callers that explicitly supply a finite `Worker(task_timeout=...)` still get a deadline, reported as a timeout failure rather than user cancellation.
-
-Worker failures retain the exit code/signal, any reported task error, and a bounded stderr tail (20 entries, up to 1024 characters each). Progress output, oversized lines and invalid UTF-8 cannot hide the final native error. Process termination and stderr-reader cleanup use bounded waits.
+The corpus generates 12 requests twice; inspect its saved samples for semantic coherence. E2E runs two uncached Qwen → FLUX q4 → SeedVR2 cycles at 864×1152, recording dimensions, memory and LM Studio state. Outputs are in `generated/verification/`. These checks are opt-in and use local inference. Worker heartbeats keep long tasks observable; `PROMPT_GEN_WORKER_TIMEOUT` controls liveness checks, not a five-minute generation deadline. The web worker has a separate 30-minute overall task deadline; large batches may need splitting. Direct CLI runs do not use that web-worker deadline.
 
 Measured results and remaining acceptance limits: [verification report](docs/flux3-verification.md).
 
@@ -230,8 +224,6 @@ Measured results and remaining acceptance limits: [verification report](docs/flu
 **FLUX 3 checkpoint missing** — Run the q4 provisioning command or set `PROMPT_GEN_IMAGE_MODEL_PATH`.
 
 **Out of memory** — Reduce dimensions and enable deferred enhancement. SeedVR2 tiling affects enhancement only.
-
-**Leaked semaphore warning** — Indicates shutdown cleanup, not proof of a GPU memory leak. Inspect the task's exit code/signal, recent stderr and `[image-memory]` records. Also check whether another LM Studio client reloaded Qwen during image work.
 
 **Invalid grammar JSON** — Retry with `--no-cache`; inspect the cached raw LM response.
 
