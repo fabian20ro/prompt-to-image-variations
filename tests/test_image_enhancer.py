@@ -1,8 +1,11 @@
 """Tests for image_enhancer.py - SeedVR2 enhancement wrapper."""
 
 import sys
+import json
+import subprocess
+import shutil
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +19,49 @@ from image_enhancer import (
     enhance_image,
     collect_images,
 )
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_enhancement_emits_memory_snapshots_on_success_and_failure(monkeypatch, tmp_path, capsys, fail):
+    """Observe diagnostics through the public enhancer, not its helpers."""
+    source = tmp_path / "input.png"
+    Image.new("RGB", (16, 16)).save(source)
+    output = tmp_path / "enhanced.png"
+    if fail:
+        output.mkdir()
+
+    class SeedVR2:
+        def __init__(self, **kwargs):
+            pass
+
+        def generate_image(self, **kwargs):
+            return SimpleNamespace(save=lambda path, overwrite: Image.new("RGB", (32, 32)).save(path))
+
+    monkeypatch.setitem(sys.modules, "mflux.models.seedvr2.variants.upscale.seedvr2", SimpleNamespace(SeedVR2=SeedVR2))
+    monkeypatch.setitem(sys.modules, "mflux.utils.scale_factor", SimpleNamespace(ScaleFactor=lambda value: value))
+    monkeypatch.setitem(sys.modules, "mlx.core", SimpleNamespace(
+        clear_cache=lambda: None, get_active_memory=lambda: 2048,
+        get_cache_memory=lambda: 256, get_peak_memory=lambda: 8192,
+    ))
+    monkeypatch.setattr(shutil, "which", lambda _: "/fake/lms")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0))
+    clear_enhancer_cache()
+    try:
+        if fail:
+            with pytest.raises(IsADirectoryError):
+                enhance_image(source, output, seed=42)
+        else:
+            enhance_image(source, output, seed=42)
+        records = [json.loads(line.removeprefix("[image-memory] "))
+                   for line in capsys.readouterr().err.splitlines() if line.startswith("[image-memory] ")]
+        assert records == [
+            {"operation": "enhance", "phase": "before", "image": "enhanced.png",
+             "active_bytes": 2048, "cache_bytes": 256, "process_peak_bytes": 8192},
+            {"operation": "enhance", "phase": "failed" if fail else "after", "image": "enhanced.png",
+             "active_bytes": 2048, "cache_bytes": 256, "process_peak_bytes": 8192},
+        ]
+    finally:
+        clear_enhancer_cache()
 
 
 class TestEnhancerCache:

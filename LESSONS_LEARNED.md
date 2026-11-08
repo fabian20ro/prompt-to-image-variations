@@ -59,6 +59,12 @@ move it to the Archive section at the bottom with a date and reason.
 
 ## Performance & Infrastructure
 
+**[2026-11-08]** Distinguish batch deadline from memory failure — The former 1800-second worker deadline terminated healthy batches and reproduced SIGTERM plus Python's leaked-semaphore shutdown warning in a CPU-only probe. Inner cancellation also hid timeout failures as cancelled/no-error. The worker now has no default overall deadline; its outer execution layer owns explicit deadline/shutdown status, separately from bounded child cleanup. The warning alone is not evidence of a GPU memory leak; the liveness setting is a polling interval, not a task deadline.
+
+**[2026-11-08]** Bound embeddings separately from model weights — Installed mflux 0.24.0 `_Flux3KleinCore._encode_prompt` stores every unique prompt's tensors in an unbounded `prompt_cache`. The renderer now retains only the current prompt while reusing weights; failed inference/image saves clear embeddings. CPU weak-reference probes confirm reference release, not a native memory plateau or crash causation. Allocator-cache clearing alone cannot release live references. MLX diagnostic peaks stay process-wide so per-image logging does not reset wider hardware acceptance measurements.
+
+**[2026-11-08]** Observe cleanup before test teardown — A harness calling `Worker.stop()` after a failure event can hide an orphaned image child by terminating it on the test's behalf. Capture child state at the real queue failure notification. Public lifecycle regressions now cover this ordering, timeout versus cancellation, native crash tails and bounded process/pipe cleanup.
+
 **[2026-11-07]** LM Studio unload is not an exclusive memory lease — Other CLI clients can reload a model during multi-minute image work. Verify native inventory at lifecycle boundaries and pause competing clients for hardware acceptance; do not weaken unload checks or kill unrelated clients to make tests pass. Two uninterrupted FLUX/SeedVR2 cycles passed after the competing reloads ceased.
 
 **[2026-02-07]** Open worker logs before long tasks - If log files are opened after pipeline execution starts, early progress information is permanently lost.
@@ -72,6 +78,8 @@ move it to the Archive section at the bottom with a date and reason.
 **[2026-05-08]** When uv wheel extraction fails with `Operation not permitted` in the default cache, point `UV_CACHE_DIR` at a writable local path like `/tmp/uv-cache` before retrying.
 
 ## Process & Workflow
+
+**[2026-11-08]** Always name the remote destination when publishing a fresh branch — This repo uses `push.default=upstream`; a branch created from `origin/master` inherits master as its upstream. A source-only `git push -u origin <branch>` unexpectedly updated master. Create review branches with `--no-track`, publish with an explicit refspec such as `git push -u origin HEAD:refs/heads/<branch>`, then verify the remote ref and tracking destination before creating a PR. Repair an accidental master update with a user-approved ordinary revert, not a history rewrite; reapply the fixes after that revert so the PR has a real diff.
 
 **[2026-02-07]** Emit queue state updates after clear - Emit `queue_updated` together with `queue_cleared` so existing SSE clients refresh immediately.
 **[2026-02-07]** Prefer non-blocking UI confirmations - Replacing `alert/confirm` with toast/modal flows reduces disruptive UI pauses and improves task continuity.

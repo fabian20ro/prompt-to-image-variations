@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 import tempfile
+from collections import deque
 from pathlib import Path
 from config import settings
 
@@ -17,13 +18,13 @@ from .queue_manager import QueueManager
 class Worker:
     """Background worker that processes tasks from the queue."""
 
-    def __init__(self, queue_manager: QueueManager, generated_dir: Path, task_timeout: float = 1800.0):
+    def __init__(self, queue_manager: QueueManager, generated_dir: Path, task_timeout: float | None = None):
         """Initialize the worker.
 
         Args:
             queue_manager: Queue manager instance
             generated_dir: Path to generated/ directory
-            task_timeout: Max seconds allowed per task (default 30 minutes)
+            task_timeout: Optional overall deadline; no batch time limit by default.
         """
         self.queue_manager = queue_manager
         self.generated_dir = generated_dir
@@ -56,16 +57,30 @@ class Worker:
             except Exception as e:
                 logging.debug(f"Failed to terminate process during stop: {e}")
 
+    async def _terminate_process(self, process, graceful_timeout: float = 2.0) -> None:
+        """Reap an owned child with bounded graceful and force-kill waits."""
+        if process is None or process.returncode is not None:
+            return
+        try:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=graceful_timeout)
+            except asyncio.TimeoutError:
+                process.kill()
+                await asyncio.wait_for(process.wait(), timeout=2.0)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            logging.warning("Worker process cleanup did not finish normally")
+
     async def kill_current(self) -> bool:
         """Kill the currently running task.
 
         Returns:
             True if a task was killed
         """
-        if self._current_process is None:
+        process = self._current_process
+        if process is None:
             return False
 
-        pid = self._current_process.pid
         task_id = None
 
         # Get current task info
@@ -73,30 +88,21 @@ class Worker:
         if state.current_task:
             task_id = state.current_task.id
 
+        # Record user intent before EOF/exit can race the normal failure path.
+        if task_id:
+            self.queue_manager.cancel_task(task_id)
+
         try:
-            # Try graceful termination first
-            self._current_process.terminate()
-
-            # Wait briefly for process to terminate
-            try:
-                await asyncio.wait_for(self._current_process.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                # Force kill if still running
-                self._current_process.kill()
-                await self._current_process.wait()
-
+            await self._terminate_process(process)
         except Exception as e:
             # Process might already be dead
             logging.debug(f"Process cleanup during kill_current: {e}")
 
-        # Mark task as cancelled
-        if task_id:
-            self.queue_manager.cancel_task(task_id)
-
-        self._current_process = None
+        if self._current_process is process:
+            self._current_process = None
         return True
 
-    async def _read_stderr(self, process, task_id: str) -> list[str]:
+    async def _read_stderr(self, process, task_id: str, stderr_lines=None) -> list[str]:
         """Read stderr from process and stream to queue manager.
 
         Args:
@@ -104,24 +110,35 @@ class Worker:
             task_id: Task ID for logging context
 
         Returns:
-            List of all stderr lines (for final error reporting)
+            Bounded tail of stderr (for final error reporting).
         """
-        stderr_lines = []
-        while True:
-            line = await process.stderr.readline()
-            if not line:
-                break
-            text = line.decode().strip()
+        if stderr_lines is None:
+            stderr_lines = deque(maxlen=20)
+
+        def emit(line: bytes) -> None:
+            text = line.decode(errors="replace").strip()[-1024:]
             if text:
                 stderr_lines.append(text)
                 # Emit as SSE event for real-time display
                 self.queue_manager.emit_log(task_id, text)
                 # Also log to server logs
                 logging.info(f"[worker:{task_id[:8]}] {text}")
-        return stderr_lines
+
+        # tqdm uses carriage returns; native errors may omit newlines entirely.
+        # Bound both the unfinished line and the final diagnostic history.
+        pending = b""
+        try:
+            while chunk := await process.stderr.read(4096):
+                lines = (pending + chunk).replace(b"\r", b"\n").split(b"\n")
+                pending = lines.pop()[-4096:]
+                for line in lines:
+                    emit(line)
+        finally:
+            emit(pending)
+        return list(stderr_lines)
 
     async def _execute_task(self, task):
-        """Execute a single task with an overall timeout.
+        """Own terminal status for optional deadlines and shutdown cancellation.
 
         Args:
             task: Task to execute
@@ -132,22 +149,12 @@ class Worker:
                 timeout=self.task_timeout,
             )
         except asyncio.TimeoutError:
-            if self._current_process:
-                try:
-                    self._current_process.terminate()
-                    await asyncio.wait_for(self._current_process.wait(), timeout=5.0)
-                except (asyncio.TimeoutError, ProcessLookupError):
-                    # Force kill if graceful termination did not complete
-                    try:
-                        self._current_process.kill()
-                        await asyncio.wait_for(
-                            self._current_process.wait(), timeout=2.0
-                        )
-                    except Exception:
-                        pass  # best-effort cleanup; task already failed
             self.queue_manager.fail_task(
-                task.id, f"Task exceeded timeout of {self.task_timeout:.0f}s"
+                task.id, f"Task exceeded timeout of {self.task_timeout:g}s"
             )
+        except asyncio.CancelledError:
+            self.queue_manager.cancel_task(task.id)
+            raise
 
     async def _run_task_inner(self, task):
         """Inner execution loop for a single task. Called inside wait_for."""
@@ -163,9 +170,12 @@ class Worker:
             }, f)
             task_file = f.name
 
+        process = None
+        stderr_task = None
+        stderr_lines = deque(maxlen=20)
         try:
             # Spawn subprocess using the same Python interpreter
-            self._current_process = await asyncio.create_subprocess_exec(
+            process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 str(self._worker_script),
                 task_file,
@@ -173,12 +183,13 @@ class Worker:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.generated_dir.parent / "src"),
             )
+            self._current_process = process
 
             # Update task with PID
-            self.queue_manager.update_task_pid(task.id, self._current_process.pid)
+            self.queue_manager.update_task_pid(task.id, process.pid)
 
             # Start stderr reader concurrently
-            stderr_task = asyncio.create_task(self._read_stderr(self._current_process, task.id))
+            stderr_task = asyncio.create_task(self._read_stderr(process, task.id, stderr_lines))
 
             # Read output line by line
             result_data = None
@@ -187,11 +198,11 @@ class Worker:
             while True:
                 try:
                     line = await asyncio.wait_for(
-                        self._current_process.stdout.readline(),
+                        process.stdout.readline(),
                         timeout=settings.server.worker_timeout  # Liveness check, not a task deadline.
                     )
                 except asyncio.TimeoutError:
-                    if self._current_process.returncode is not None:
+                    if process.returncode is not None:
                         break
                     continue  # Process alive, keep waiting
 
@@ -226,14 +237,27 @@ class Worker:
                     logging.warning(f"Worker output not JSON: {line.decode().strip()[:100]}")
 
             # Wait for process to complete
-            await self._current_process.wait()
+            await process.wait()
 
             # Collect stderr (already streamed to log events, keep for error reporting)
-            stderr_lines = await stderr_task
+            try:
+                await asyncio.wait_for(stderr_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                logging.warning("Worker stderr remained open after process exit")
 
             # Check exit code
-            if self._current_process.returncode != 0 and error_message is None:
-                error_message = "; ".join(stderr_lines[:3]) if stderr_lines else f"Process exited with code {self._current_process.returncode}"
+            if process.returncode != 0:
+                reported_error = error_message
+                error_message = f"Process exited with code {process.returncode}"
+                if process.returncode < 0:
+                    try:
+                        error_message += f" ({signal.Signals(-process.returncode).name})"
+                    except ValueError:
+                        pass
+                if reported_error:
+                    error_message += f"; {reported_error}"
+                if stderr_lines:
+                    error_message += "; stderr tail: " + "; ".join(stderr_lines)
 
             # Update task status
             if error_message:
@@ -242,21 +266,23 @@ class Worker:
                 self.queue_manager.complete_task(task.id, result_data)
 
         except asyncio.CancelledError:
-            # Worker is being stopped
-            if self._current_process:
-                self._current_process.terminate()
-                await self._current_process.wait()
-            self.queue_manager.cancel_task(task.id)
+            await self._terminate_process(process, graceful_timeout=5.0)
             raise
 
         except Exception as e:
+            await self._terminate_process(process)
             self.queue_manager.fail_task(task.id, str(e))
 
         finally:
+            if stderr_task is not None:
+                if not stderr_task.done():
+                    stderr_task.cancel()
+                await asyncio.gather(stderr_task, return_exceptions=True)
             # Clean up temp file
             try:
                 os.unlink(task_file)
             except Exception as e:
                 logging.debug(f"Failed to clean up task file {task_file}: {e}")
 
-            self._current_process = None
+            if self._current_process is process:
+                self._current_process = None

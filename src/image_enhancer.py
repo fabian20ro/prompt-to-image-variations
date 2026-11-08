@@ -6,6 +6,7 @@ import gc
 from pathlib import Path
 
 from lm_studio import unload_all_models
+from image_memory import image_memory
 
 
 # Cache for loaded enhancer model (expensive to load)
@@ -111,16 +112,14 @@ def enhance_image(
     unload_all_models()
     enhancer = _get_enhancer(tiled_vae)
 
-    # Enhance the image with 2x upscaling
-    result = enhancer.generate_image(
-        seed=seed,
-        image_path=str(image_path),
-        resolution=ScaleFactor(2),
-        softness=softness,
-    )
-
-    # Save the enhanced image (overwrite if replacing original)
-    result.save(path=str(output_path), overwrite=True)
+    with image_memory("enhance", output_path):
+        result = enhancer.generate_image(
+            seed=seed,
+            image_path=str(image_path),
+            resolution=ScaleFactor(2),
+            softness=softness,
+        )
+        result.save(path=str(output_path), overwrite=True)
 
     return output_path
 
