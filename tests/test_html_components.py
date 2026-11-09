@@ -185,6 +185,23 @@ class TestLogPanel:
             "lines beyond the cap are removed."
         )
 
+    def test_js_auto_scrolls_to_newest_line(self):
+        """appendLog must pin the log panel to the newest entry on every append.
+
+        The implementation assigns logContent.scrollTop = logContent.scrollHeight
+        after each append so the live log tail stays in view while a generation
+        runs. A regression that deletes these two lines would pass every other
+        LogPanel JS test (they only check function names, escaping, branching
+        and the trim cap), yet the panel would stop following live output —
+        entries appended below the user's scroll position would arrive without
+        ever coming into view.
+        """
+        js = LogPanel.js()
+        assert "logContent.scrollTop = logContent.scrollHeight" in js, (
+            "appendLog must auto-scroll the log panel to the bottom after each "
+            "new entry; without it the panel stops following live log output."
+        )
+
 
 class TestQueueStatusBar:
     """Tests for QueueStatusBar component."""

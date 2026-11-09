@@ -89,6 +89,7 @@ class TestEmitFunctions:
         assert data["success"] is True
         assert data["data"] == {"run_id": "test-run"}
         assert data["error"] is None
+        assert set(data.keys()) == {"type", "success", "data", "error"}
 
     def test_emit_result_failure(self, capsys):
         """Test that emit_result outputs failure JSON."""
@@ -100,6 +101,8 @@ class TestEmitFunctions:
         assert data["type"] == "result"
         assert data["success"] is False
         assert data["error"] == "Something went wrong"
+        assert data["data"] is None
+        assert set(data.keys()) == {"type", "success", "data", "error"}
 
     def test_emit_image_ready(self, capsys):
         """Test that emit_image_ready outputs valid JSON."""

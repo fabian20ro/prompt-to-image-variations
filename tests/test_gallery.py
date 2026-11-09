@@ -333,6 +333,33 @@ const vm = require('node:vm'), assert = require('node:assert/strict');
         assert '<button>Enhance</button>' in content
         assert untouched_card in content
 
+    def test_update_gallery_syncs_progress_bar_emitted_by_create_gallery(self, temp_dir):
+        """update_gallery's sync must work on markup that create_gallery actually emits.
+
+        The sibling progress test hand-crafts bar markup that already matches the
+        regexes; this round-trip proves the ProgressBar component output and the
+        regexes agree. A format drift (spacing, attribute order, renamed id) would
+        otherwise leave the real interactive gallery's progress bar stale while the
+        suite stays green.
+        """
+        gallery_path = create_gallery(
+            output_dir=temp_dir,
+            prefix="rt",
+            prompts=["first", "second"],
+            images_per_prompt=1,
+            interactive=True,
+        )
+        image_path = temp_dir / "rt_0_0.png"
+        image_path.write_bytes(b"image data")
+
+        update_gallery(gallery_path, image_path, "first", 1, 2)
+
+        content = gallery_path.read_text()
+        assert f'<img src="{image_path.name}" loading="lazy" alt="first">' in content
+        assert '<span id="progress-text">Generated: 1 / 2 images</span>' in content
+        assert re.search(r'id="progress-fill"[^>]*style="width: 50%"', content)
+        assert '<p class="status">Generated: 1 / 2 images</p>' in content
+
     def test_update_gallery_preserves_sibling_action_buttons(self, temp_dir):
         """update_gallery should replace the placeholder while keeping sibling markup intact."""
         run_dir = temp_dir
