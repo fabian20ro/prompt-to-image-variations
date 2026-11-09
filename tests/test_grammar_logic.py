@@ -311,6 +311,21 @@ def test_hash_prompt_differentiates_similar_prompts():
     assert h_short != h_long and len(h_short) == len(h_long) == 12
 
 
+def test_hash_prompt_binds_temperature():
+    """Changing the sampling temperature must change the cache hash.
+
+    The grammar cache key includes the sampling temperature because it
+    changes the generated grammar: a grammar cached at one temperature
+    must not be reused for another (a new generation, not a cache hit).
+    """
+    h_default = hash_prompt("a cat")
+    h_cold = hash_prompt("a cat", temperature=0.3)
+    h_hot = hash_prompt("a cat", temperature=1.2)
+    assert h_default != h_cold
+    assert h_default != h_hot
+    assert h_cold != h_hot
+
+
 # ---------------------------------------------------------------------------
 # get_system_prompt — explicit path, non-default location
 # ---------------------------------------------------------------------------
