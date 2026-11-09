@@ -641,6 +641,12 @@ class TestRunSummary:
         with pytest.raises(GalleryNotFoundError):
             service.get_run_summary("nonexistent")
 
+    def test_get_run_summary_missing_directory_message(self, temp_dir):
+        """Test get_run_summary not-found error names the missing run."""
+        service = GalleryService(temp_dir, temp_dir)
+        with pytest.raises(GalleryNotFoundError, match="Gallery not found: 20240101_120000_abc123"):
+            service.get_run_summary("20240101_120000_abc123")
+
     def test_get_run_summary_default_prefix(self, temp_dir):
         """Test get_run_summary uses default prefix when no metadata."""
         run_dir = temp_dir / "run"
