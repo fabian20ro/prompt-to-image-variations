@@ -64,7 +64,8 @@ def _read_user_prompt(run_dir: Path) -> str | None:
     return prompt if isinstance(prompt, str) else None
 
 
-def list_generated(as_json: bool = False, quiet: bool = False, full: bool = False) -> None:
+def list_generated(as_json: bool = False, quiet: bool = False, full: bool = False,
+                   wrap: bool = False) -> None:
     """List existing generated prompt runs with prompt/image counts and user prompt (read-only)."""
     image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
     runs = []
@@ -102,8 +103,14 @@ def list_generated(as_json: bool = False, quiet: bool = False, full: bool = Fals
         if user_prompt:
             if not full and len(user_prompt) > 60:
                 user_prompt = user_prompt[:60] + "..."
-            line += f" ({user_prompt})"
-        click.echo(line)
+            if wrap:
+                click.echo(line)
+                click.echo(f"  {user_prompt}")
+            else:
+                line += f" ({user_prompt})"
+                click.echo(line)
+        else:
+            click.echo(line)
     total_prompts = sum(run["prompt_count"] for run in runs)
     total_images = sum(run["image_count"] for run in runs)
     run_plural = "s" if len(runs) != 1 else ""
@@ -147,6 +154,10 @@ def _status_echo(message: str) -> None:
 @click.option(
     '--full', is_flag=True,
     help='With --list: show the complete user prompt (no 60-char truncation)'
+)
+@click.option(
+    '--wrap', is_flag=True,
+    help='With --list: put the user prompt on its own indented line'
 )
 @click.option(
     '-n', '--count',
@@ -322,6 +333,7 @@ def main(
     dump_config: bool = False,
     as_list: bool = False,
     full: bool = False,
+    wrap: bool = False,
 ):
     """
     Generate FLUX 3 Image Klein prompt variations using local LLM-powered Tracery grammars.
@@ -370,7 +382,7 @@ def main(
 
     # Handle --list: read-only inspection, no pipeline or LM Studio needed
     if as_list:
-        list_generated(as_json=as_json, quiet=quiet, full=full)
+        list_generated(as_json=as_json, quiet=quiet, full=full, wrap=wrap)
         return
 
     # Handle --clean

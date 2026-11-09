@@ -354,6 +354,66 @@ class TestCliListCommand:
         assert entry["prompt_count"] == 2
         assert entry["image_count"] == 2
 
+    def test_list_wrap_moves_prompt_to_indented_line(self, temp_dir):
+        """Test --list --wrap puts the user prompt on its own indented line."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run"
+        run.mkdir(parents=True)
+        (run / "image_0.txt").write_text("a")
+        (run / "image_0_0.png").write_text("binary")
+        (run / "image.metaprompt.json").write_text(json.dumps(
+            {"prefix": "image", "count": 1, "user_prompt": "a" * 80}))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            plain = runner.invoke(main, ["--list"])
+            wrapped = runner.invoke(main, ["--list", "--wrap"])
+            wrapped_full = runner.invoke(main, ["--list", "--wrap", "--full"])
+            json_plain = runner.invoke(main, ["--list", "--json"])
+            json_wrap = runner.invoke(main, ["--list", "--json", "--wrap"])
+
+        assert plain.exit_code == 0
+        assert plain.output == (
+            "run: 1 prompts, 1 image (" + ("a" * 60) + "...)\n"
+            "Total: 1 run, 1 prompts, 1 image\n"
+        )
+        assert ("a" * 80) not in plain.output
+
+        assert wrapped.exit_code == 0
+        assert wrapped.output == (
+            "run: 1 prompts, 1 image\n"
+            f"  {('a' * 60)}...\n"
+            "Total: 1 run, 1 prompts, 1 image\n"
+        )
+
+        assert wrapped_full.exit_code == 0
+        assert wrapped_full.output == (
+            "run: 1 prompts, 1 image\n"
+            f"  {'a' * 80}\n"
+            "Total: 1 run, 1 prompts, 1 image\n"
+        )
+
+        assert json_plain.exit_code == 0
+        assert json_wrap.exit_code == 0
+        assert json_plain.output == json_wrap.output
+
+    def test_list_wrap_without_prompt_keeps_single_line(self, temp_dir):
+        """Test --list --wrap is a no-op when a run has no user prompt."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run"
+        run.mkdir(parents=True)
+        (run / "p1.txt").write_text("a")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--wrap"])
+
+        assert result.exit_code == 0
+        assert result.output == "run: 1 prompts\nTotal: 1 run, 1 prompts\n"
+
+
     def test_list_json_outputs_array(self, temp_dir):
         """Test --list --json emits a valid JSON array with run_id and prompt_count."""
         prompts = temp_dir / "prompts"
