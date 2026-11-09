@@ -103,6 +103,16 @@ class TestUtils:
         count = count_images_in_run(temp_dir)
         assert count == 3
 
+    def test_count_images_in_run_explicit_prefix_overrides_metadata(self, temp_dir):
+        """An explicitly supplied prefix is honored instead of the auto-detected one."""
+        (temp_dir / "test.metaprompt.json").write_text(json.dumps({"prefix": "test"}))
+        (temp_dir / "test_0_0.png").write_text("fake image")
+        (temp_dir / "test_0_1.png").write_text("fake image")
+        (temp_dir / "other_0_0.png").write_text("fake image")
+
+        assert count_images_in_run(temp_dir) == 2
+        assert count_images_in_run(temp_dir, prefix="other") == 1
+
     def test_get_prompts_from_run_filtering(self, temp_dir):
         """Test that non-prompt files are filtered out."""
         (temp_dir / "test.metaprompt.json").write_text(json.dumps({"prefix": "test"}))
