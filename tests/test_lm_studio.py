@@ -208,11 +208,12 @@ class TestUnloadAllModels:
              patch(
                  "lm_studio.subprocess.run",
                  side_effect=lambda *a, **kw: (_ for _ in ()).throw(raise_exc),
-             ), \
+             ) as run_mock, \
              patch("lm_studio.time.sleep"):
             with pytest.raises(OSError) as exc_info:
                 unload_all_models()
             assert "device busy" in str(exc_info.value)
+            assert run_mock.call_count == 1
 
     def test_succeeds_when_stderr_present_on_returncode_zero(self):
         """Successful subprocess completion (returncode==0) must not raise
