@@ -66,6 +66,41 @@ def test_run_from_grammar_source_in_metadata(mock_grammar_file, tmp_path):
     assert metadata["user_prompt"] == "a dragon"
 
 
+def test_run_from_grammar_picks_up_raw_response_sidecar(mock_grammar_file, tmp_path):
+    """run_from_grammar must pick up the <stem>.raw.txt sidecar next to the
+    grammar file and persist it in the new run's output directory.
+
+    The seam reads the grammar's raw LLM response file and forwards it to
+    run_from_grammar_text, which saves it as {prefix}_raw_response.txt and
+    passes the sidecar filename to create_gallery. If the pickup is dropped
+    the re-imported run still succeeds, but the raw response sidecar is
+    silently missing from the output and gallery — no existing assertion
+    catches that.
+    """
+    raw_content = '{"choices": [{"text": "raw response body"}]}'
+    (mock_grammar_file.parent / "test.raw.txt").write_text(raw_content)
+
+    output_dir = tmp_path / "output"
+
+    with patch("pipeline.create_gallery") as mock_gallery, \
+         patch("pipeline.generate_master_index"), \
+         patch("pipeline.append_grammar_revision"), \
+         patch("pipeline.run_tracery", return_value=["a dragon, expanded"]):
+        result = PipelineExecutor().run_from_grammar(
+            mock_grammar_file,
+            count=1,
+            output_dir=output_dir,
+        )
+
+    assert result.success is True
+    raw_out = output_dir / "image_raw_response.txt"
+    assert raw_out.exists()
+    assert raw_out.read_text() == raw_content
+    # The gallery must receive the sidecar filename for rendering.
+    mock_gallery.assert_called_once()
+    assert mock_gallery.call_args.kwargs["raw_response_file"] == "image_raw_response.txt"
+
+
 def test_run_from_grammar_text_invalid_grammar_returns_error(tmp_path):
     """Invalid Tracery grammar should produce a failed PipelineResult with an error message."""
     executor = PipelineExecutor()
