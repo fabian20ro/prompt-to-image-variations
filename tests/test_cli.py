@@ -413,6 +413,93 @@ class TestCliListCommand:
         assert result.exit_code == 0
         assert result.output == "run: 1 prompts\nTotal: 1 run, 1 prompts\n"
 
+    def test_list_recent_shows_only_most_recently_modified_runs(self, temp_dir):
+        """Test --list --recent 2 with 5 runs shows only the 2 most recently modified dirs."""
+        import os
+        prompts = temp_dir / "prompts"
+        mtimes = {f"run_{i}": 1_700_000_000 + i for i in range(1, 6)}
+        for name in mtimes:
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("a")
+            os.utime(run, (mtimes[name], mtimes[name]))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--recent", "2"])
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "run_4: 1 prompts\n"
+            "run_5: 1 prompts\n"
+            "Total: 2 runs, 2 prompts\n"
+        )
+
+    def test_list_without_recent_keeps_every_run(self, temp_dir):
+        """Test --list without --recent is byte-identical to the unfiltered output."""
+        prompts = temp_dir / "prompts"
+        for name in ("run_1", "run_2"):
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("a")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            plain = runner.invoke(main, ["--list"])
+            recent_all = runner.invoke(main, ["--list", "--recent", "5"])
+
+        assert plain.exit_code == 0
+        assert plain.output == (
+            "run_1: 1 prompts\n"
+            "run_2: 1 prompts\n"
+            "Total: 2 runs, 2 prompts\n"
+        )
+        assert recent_all.exit_code == 0
+        assert recent_all.output == plain.output
+
+    def test_list_recent_json_emits_exactly_n_objects(self, temp_dir):
+        """Test --list --recent 2 --json outputs a JSON array of exactly 2 objects."""
+        import os
+        prompts = temp_dir / "prompts"
+        mtimes = {f"run_{i}": 1_700_000_000 + i for i in range(1, 6)}
+        for name in mtimes:
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("a")
+            os.utime(run, (mtimes[name], mtimes[name]))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--recent", "2", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert len(parsed) == 2
+        assert [e["run_id"] for e in parsed] == ["run_4", "run_5"]
+        for entry in parsed:
+            assert set(entry) == {"run_id", "prompt_count", "image_count", "user_prompt"}
+            assert entry["prompt_count"] == 1
+            assert entry["image_count"] == 0
+            assert entry["user_prompt"] is None
+
+    def test_list_recent_zero_matches_empty_directory_behavior(self, temp_dir):
+        """Test --list --recent 0 displays no runs and prints 'No runs found.'."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run"
+        run.mkdir(parents=True)
+        (run / "p1.txt").write_text("a")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--recent", "0"])
+
+        assert result.exit_code == 0
+        assert result.output == "No runs found.\n"
+
 
     def test_list_json_outputs_array(self, temp_dir):
         """Test --list --json emits a valid JSON array with run_id and prompt_count."""
