@@ -4,6 +4,7 @@
 import shutil
 import sys
 import json
+import time
 from pathlib import Path
 
 import click
@@ -65,30 +66,44 @@ def _read_user_prompt(run_dir: Path) -> str | None:
 
 
 def list_generated(as_json: bool = False, quiet: bool = False, full: bool = False,
-                   wrap: bool = False) -> None:
-    """List existing generated prompt runs with prompt/image counts and user prompt (read-only)."""
+                   wrap: bool = False, recent: int | None = None,
+                   timestamps: bool = False) -> None:
+    """List existing generated prompt runs with prompt/image counts and user prompt (read-only).
+
+    With recent, only the N most recently modified run directories are shown.
+    With timestamps, each run line shows the run directory modification date.
+    """
     image_extensions = {".png", ".jpg", ".jpeg", ".webp"}
     runs = []
     if paths.prompts_dir.exists():
-        for d in sorted(paths.prompts_dir.iterdir()):
-            if d.is_dir():
-                prompt_count = len(prompt_files_in_run(d))
-                image_count = 0
-                for f in d.iterdir():
-                    if f.is_file():
-                        suffix = f.suffix.lower()
-                        if suffix in image_extensions:
-                            image_count += 1
-                runs.append({
-                    "run_id": d.name,
-                    "prompt_count": prompt_count,
-                    "image_count": image_count,
-                    "user_prompt": _read_user_prompt(d),
-                })
+        dirs = [d for d in paths.prompts_dir.iterdir() if d.is_dir()]
+        if recent is not None:
+            dirs = sorted(dirs, key=lambda d: d.stat().st_mtime, reverse=True)[:recent]
+        for d in sorted(dirs):
+            prompt_count = len(prompt_files_in_run(d))
+            image_count = 0
+            for f in d.iterdir():
+                if f.is_file():
+                    suffix = f.suffix.lower()
+                    if suffix in image_extensions:
+                        image_count += 1
+            if timestamps:
+                mtime = d.stat().st_mtime
+                timestamp = time.strftime("%Y-%m-%d", time.localtime(mtime))
+            else:
+                timestamp = None
+            runs.append({
+                "run_id": d.name,
+                "prompt_count": prompt_count,
+                "image_count": image_count,
+                "user_prompt": _read_user_prompt(d),
+                "timestamp": timestamp,
+            })
 
     if quiet:
         return
     if as_json:
+        runs = [{k: v for k, v in run.items() if k != "timestamp"} for run in runs]
         click.echo(json.dumps(runs, indent=2))
         return
     if not runs:
@@ -96,6 +111,8 @@ def list_generated(as_json: bool = False, quiet: bool = False, full: bool = Fals
         return
     for run in runs:
         line = f"{run['run_id']}: {run['prompt_count']} prompts"
+        if timestamps and run["timestamp"] is not None:
+            line += f" [{run['timestamp']}]"
         if run["image_count"]:
             plural = "s" if run["image_count"] != 1 else ""
             line += f", {run['image_count']} image{plural}"
@@ -158,6 +175,14 @@ def _status_echo(message: str) -> None:
 @click.option(
     '--wrap', is_flag=True,
     help='With --list: put the user prompt on its own indented line'
+)
+@click.option(
+    '--recent', type=int, default=None,
+    help='With --list: only show the N most recently modified runs'
+)
+@click.option(
+    '--timestamps', is_flag=True,
+    help='With --list: show each run\'s modification date'
 )
 @click.option(
     '-n', '--count',
@@ -334,6 +359,8 @@ def main(
     as_list: bool = False,
     full: bool = False,
     wrap: bool = False,
+    recent: int | None = None,
+    timestamps: bool = False,
 ):
     """
     Generate FLUX 3 Image Klein prompt variations using local LLM-powered Tracery grammars.
@@ -382,7 +409,8 @@ def main(
 
     # Handle --list: read-only inspection, no pipeline or LM Studio needed
     if as_list:
-        list_generated(as_json=as_json, quiet=quiet, full=full, wrap=wrap)
+        list_generated(as_json=as_json, quiet=quiet, full=full, wrap=wrap,
+                       recent=recent, timestamps=timestamps)
         return
 
     # Handle --clean

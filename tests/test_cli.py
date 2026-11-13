@@ -413,6 +413,212 @@ class TestCliListCommand:
         assert result.exit_code == 0
         assert result.output == "run: 1 prompts\nTotal: 1 run, 1 prompts\n"
 
+    def test_list_recent_shows_only_most_recently_modified_runs(self, temp_dir):
+        """Test --list --recent 2 with 5 runs shows only the 2 most recently modified dirs."""
+        import os
+        prompts = temp_dir / "prompts"
+        mtimes = {f"run_{i}": 1_700_000_000 + i for i in range(1, 6)}
+        for name in mtimes:
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("a")
+            os.utime(run, (mtimes[name], mtimes[name]))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--recent", "2"])
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "run_4: 1 prompts\n"
+            "run_5: 1 prompts\n"
+            "Total: 2 runs, 2 prompts\n"
+        )
+
+    def test_list_without_recent_keeps_every_run(self, temp_dir):
+        """Test --list without --recent is byte-identical to the unfiltered output."""
+        prompts = temp_dir / "prompts"
+        for name in ("run_1", "run_2"):
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("a")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            plain = runner.invoke(main, ["--list"])
+            recent_all = runner.invoke(main, ["--list", "--recent", "5"])
+
+        assert plain.exit_code == 0
+        assert plain.output == (
+            "run_1: 1 prompts\n"
+            "run_2: 1 prompts\n"
+            "Total: 2 runs, 2 prompts\n"
+        )
+        assert recent_all.exit_code == 0
+        assert recent_all.output == plain.output
+
+    def test_list_recent_json_emits_exactly_n_objects(self, temp_dir):
+        """Test --list --recent 2 --json outputs a JSON array of exactly 2 objects."""
+        import os
+        prompts = temp_dir / "prompts"
+        mtimes = {f"run_{i}": 1_700_000_000 + i for i in range(1, 6)}
+        for name in mtimes:
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("a")
+            os.utime(run, (mtimes[name], mtimes[name]))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--recent", "2", "--json"])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert len(parsed) == 2
+        assert [e["run_id"] for e in parsed] == ["run_4", "run_5"]
+        for entry in parsed:
+            assert set(entry) == {"run_id", "prompt_count", "image_count", "user_prompt"}
+            assert entry["prompt_count"] == 1
+            assert entry["image_count"] == 0
+            assert entry["user_prompt"] is None
+
+    def test_list_recent_zero_matches_empty_directory_behavior(self, temp_dir):
+        """Test --list --recent 0 displays no runs and prints 'No runs found.'."""
+        prompts = temp_dir / "prompts"
+        run = prompts / "run"
+        run.mkdir(parents=True)
+        (run / "p1.txt").write_text("a")
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--recent", "0"])
+
+        assert result.exit_code == 0
+        assert result.output == "No runs found.\n"
+
+    def test_list_timestamps_shows_run_modification_date(self, temp_dir):
+        """Test --list --timestamps shows YYYY-MM-DD (from the directory mtime) after the run ID."""
+        import os
+        import time as _time
+        prompts = temp_dir / "prompts"
+        for name in ("run_a", "run_b"):
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("a")
+        t_a = _time.mktime(_time.strptime("2024-02-03", "%Y-%m-%d"))
+        t_b = _time.mktime(_time.strptime("2024-01-02", "%Y-%m-%d"))
+        os.utime(prompts / "run_a", (t_a, t_a))
+        os.utime(prompts / "run_b", (t_b, t_b))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--timestamps"])
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "run_a: 1 prompts [2024-02-03]\n"
+            "run_b: 1 prompts [2024-01-02]\n"
+            "Total: 2 runs, 2 prompts\n"
+        )
+
+    def test_list_without_timestamps_is_unchanged(self, temp_dir):
+        """Test --list without --timestamps is byte-identical to the current output."""
+        import os
+        prompts = temp_dir / "prompts"
+        run = prompts / "run"
+        run.mkdir(parents=True)
+        (run / "p1.txt").write_text("a")
+        past = 1_700_000_000
+        os.utime(run, (past, past))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list"])
+
+        assert result.exit_code == 0
+        assert result.output == "run: 1 prompts\nTotal: 1 run, 1 prompts\n"
+
+    def test_list_timestamps_with_recent_shows_dates_only_on_recent_runs(self, temp_dir):
+        """Test --list --timestamps --recent 2 shows dates on the 2 newest runs; Total unchanged."""
+        import os
+        import time as _time
+        prompts = temp_dir / "prompts"
+        dates = {
+            "run_1": "2024-01-01",
+            "run_2": "2024-01-02",
+            "run_3": "2024-01-03",
+            "run_4": "2024-01-04",
+            "run_5": "2024-01-05",
+        }
+        for name, date in dates.items():
+            run = prompts / name
+            run.mkdir(parents=True)
+            (run / "p1.txt").write_text("a")
+            t = _time.mktime(_time.strptime(date, "%Y-%m-%d"))
+            os.utime(run, (t, t))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--timestamps", "--recent", "2"])
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "run_4: 1 prompts [2024-01-04]\n"
+            "run_5: 1 prompts [2024-01-05]\n"
+            "Total: 2 runs, 2 prompts\n"
+        )
+
+    def test_list_timestamps_json_same_as_without_flag(self, temp_dir):
+        """Test --list --timestamps --json emits the same JSON as without --timestamps."""
+        import os
+        prompts = temp_dir / "prompts"
+        (prompts / "run_a").mkdir(parents=True)
+        (prompts / "run_a" / "p1.txt").write_text("a")
+        t = 1_700_000_000
+        os.utime(prompts / "run_a", (t, t))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            plain = runner.invoke(main, ["--list", "--json"])
+            stamped = runner.invoke(main, ["--list", "--timestamps", "--json"])
+
+        assert plain.exit_code == 0
+        assert stamped.exit_code == 0
+        assert stamped.output == plain.output
+        parsed = json.loads(stamped.output)
+        assert {"run_id": "run_a", "prompt_count": 1, "image_count": 0,
+                "user_prompt": None} in parsed
+        for entry in parsed:
+            assert "timestamp" not in entry
+
+    def test_list_timestamps_with_full_shows_date_and_prompt(self, temp_dir):
+        """Test --list --full --timestamps shows the date after the ID and the prompt after it."""
+        import os
+        import time as _time
+        prompts = temp_dir / "prompts"
+        run = prompts / "run"
+        run.mkdir(parents=True)
+        (run / "p1.txt").write_text("a cat")
+        (run / "run.metaprompt.json").write_text('{"user_prompt": "a cat"}')
+        t = _time.mktime(_time.strptime("2024-03-04", "%Y-%m-%d"))
+        os.utime(run, (t, t))
+
+        runner = CliRunner()
+        with patch("cli.paths") as mock_paths:
+            mock_paths.prompts_dir = prompts
+            result = runner.invoke(main, ["--list", "--full", "--timestamps"])
+
+        assert result.exit_code == 0
+        assert "run: 1 prompts [2024-03-04] (a cat)" in result.output
+
 
     def test_list_json_outputs_array(self, temp_dir):
         """Test --list --json emits a valid JSON array with run_id and prompt_count."""
