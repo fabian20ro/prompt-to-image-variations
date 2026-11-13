@@ -665,6 +665,36 @@ class TestGetRecentRevisions:
 
         assert [entry["id"] for entry in result] == ["r0", "r2"]
 
+    def test_action_filter_excludes_entries_missing_action_key(self):
+        """action_filter must drop entries missing the 'action' key rather than crash.
+
+        The filter branch at lines 110-111 compares ``e.get("action") == action_filter``:
+        an entry without an ``action`` key yields ``None``, which never equals a real
+        filter string, so the entry is silently excluded from the result. Persisted
+        history files can contain partially-populated entries (see
+        TestAppendGrammarMalformedHistory), and callers pass those lists into
+        get_recent_revisions verbatim — the filter must survive them.
+
+        Every existing action_filter test supplies the key on all entries; the
+        missing-key boundary is pinned only for the projection branch
+        (``test_include_action_with_missing_action_key``). A refactor switching the
+        filter to ``e["action"] == action_filter`` (KeyError on persisted entries) or
+        ``e.get("action", action_filter) == action_filter`` (leaking key-less entries)
+        would fail the assertions below.
+        """
+        history = [
+            {"id": "r0", "grammar": "g_0"},
+            {"id": "r1", "action": "update", "grammar": "g_1"},
+            {"id": "r2", "grammar": "g_2"},
+            {"id": "r3", "action": "update", "grammar": "g_3"},
+        ]
+
+        result = get_recent_revisions(history, n=10, action_filter="update")
+
+        assert [entry["id"] for entry in result] == ["r1", "r3"]
+        for entry in result:
+            assert set(entry.keys()) == {"id", "action", "grammar"}
+
     def test_include_action_none_returns_full_entries(self):
         """include_action=None must return full entries (like False, not like True).
 
