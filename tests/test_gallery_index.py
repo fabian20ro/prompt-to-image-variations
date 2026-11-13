@@ -627,6 +627,31 @@ class TestGalleryIndexInteractive:
         assert 'class="btn-delete"' in html
         assert 'deleteGallery("20240101_120000_xxx")' in html
 
+    def test_build_card_html_delete_id_neutralizes_script_terminator(self):
+        """The delete button id must be JSON-escaped and neutralize a script terminator.
+
+        Every existing card test uses a plain alphanumeric dir_name, so removing
+        the json.dumps()/replace() escaping in _build_card_html would still pass
+        them all, while a dir_name containing '</script>' would let the inline
+        wiring terminate the enclosing script block in the rendered index.
+        """
+        from gallery_index import _build_card_html
+        run = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "prompt_count": 1,
+            "model": "test-model",
+            "dir_name": "2024</script>0101_x",
+            "gallery_path": "prompts/2024</script>0101_x/test_gallery.html",
+            "thumbnail_file": None,
+            "thumbnail": None,
+        }
+        html = _build_card_html(run, interactive=True, is_archive=False)
+
+        assert 'class="btn-delete"' in html
+        assert 'deleteGallery("2024<\\/script>0101_x")' in html
+
     def test_flat_archive_prompt_counting_reflects_unique_indices(self, temp_dir):
         """Flat archive card should reflect distinct prompt indices from filenames.
 
