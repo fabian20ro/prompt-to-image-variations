@@ -247,6 +247,42 @@ const vm = require('node:vm'), assert = require('node:assert/strict');
         assert "prompt-only run" in content
         assert "Pending..." not in content
 
+    @pytest.mark.parametrize(
+        ("display_title", "user_prompt", "expected_title"),
+        [
+            ("Curated grammar title", "raw user prompt", "Curated grammar title"),
+            ("", "raw user prompt", "raw user prompt"),
+        ],
+    )
+    def test_gallery_directory_resolves_header_title_precedence(
+        self, temp_dir, display_title, user_prompt, expected_title
+    ):
+        """The gallery header must prefer display_title and fall back to user_prompt.
+
+        test_gallery_uses_persisted_layout_and_settings persists display_title
+        without a user_prompt key, so it cannot detect a swap of the two keys'
+        precedence in generate_gallery_for_directory.
+        """
+        run_dir = temp_dir
+        metadata = {
+            "prefix": "test",
+            "count": 1,
+            "user_prompt": user_prompt,
+            "display_title": display_title,
+            "image_generation": {"images_per_prompt": 1},
+        }
+        create_run_files(run_dir, num_prompts=1, metadata=metadata)
+
+        gallery_path = generate_gallery_for_directory(run_dir)
+        content = gallery_path.read_text()
+
+        start = content.index('<p class="original-prompt">')
+        shown = content[start + len('<p class="original-prompt">'):content.index("</p>", start)]
+        assert shown == expected_title
+        other = user_prompt if display_title else display_title
+        if other:
+            assert other not in content
+
     def test_update_gallery(self, temp_dir):
         """Test that update_gallery correctly replaces placeholders and updates status."""
         run_dir = temp_dir
