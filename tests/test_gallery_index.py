@@ -789,6 +789,29 @@ class TestGalleryIndexInteractive:
         html = _build_flat_archive_card_html(archive, interactive=True)
         assert 'src="/saved/image_20240101_120000_0_0.png"' in html
 
+    def test_build_flat_archive_card_static_uses_relative_saved_path(self):
+        """Flat archive card must use the relative 'saved/' path in static mode.
+
+        Existing flat-archive card tests pass first_image=None (the 'No
+        images' fallback) or interactive=True (the /saved/ route). The
+        static branch that renders <img src="saved/<name>"> is implemented
+        but untested — a regression to the absolute '/saved/<name>' form in
+        static mode (which breaks the file-opened and deployed index) would
+        slip through undetected.
+        """
+        from pathlib import Path
+        from gallery_index import _build_flat_archive_card_html
+        archive = {
+            "user_prompt": "test",
+            "display_time": "2024-01-01 12:00",
+            "image_count": 3,
+            "model": "test-model",
+            "first_image": Path("image_20240101_120000_0_0.png"),
+        }
+        html = _build_flat_archive_card_html(archive, interactive=False)
+        assert 'src="saved/image_20240101_120000_0_0.png"' in html
+        assert 'src="/saved/' not in html
+
 
 class TestGrammarRevisionCount:
     """Tests for grammar revision count on master index entries."""

@@ -121,6 +121,25 @@ class TestGalleryService:
         with pytest.raises(GalleryNotFoundError, match="Archive not found"):
             service.get_run_directory("../archive_outside/archive_20240101", is_archive=True)
 
+    def test_get_run_directory_rejects_absolute_path_outside_base(self, temp_dir):
+        """Test get_run_directory rejects an absolute path run_id that escapes prompts/.
+
+        ``Path(base) / "/tmp"`` yields the absolute path itself, which contains
+        no ".." segment, so a purely lexical containment check (the pattern
+        proved by the sibling traversal tests) would pass it and return an
+        existing directory outside prompts/ as a gallery run. The resolve-based
+        guard is the only check that rejects it (mirrors the sibling
+        validate_file_access absolute-path test); the message pins that the
+        rejected run_id is reported.
+        """
+        prompts_dir = temp_dir / "prompts"
+        saved_dir = temp_dir / "saved"
+        prompts_dir.mkdir()
+
+        service = GalleryService(prompts_dir, saved_dir)
+        with pytest.raises(GalleryNotFoundError, match="Gallery not found: /tmp"):
+            service.get_run_directory("/tmp")
+
     def test_load_metadata_success(self, temp_dir):
         """Test loading metadata."""
         (temp_dir / "test.metaprompt.json").write_text(json.dumps({
