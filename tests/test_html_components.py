@@ -172,7 +172,7 @@ class TestLogPanel:
         without bound over a long session — each appended line is a real DOM
         node, and unbounded growth eventually makes the gallery sluggish. The
         implemented trim is a while loop bounded by the cap that removes the
-        first child, keeping the DOM flat; it is observable in the produced JS.
+        oldest log line (never the jump button), keeping the DOM flat; it is observable in the produced JS.
         """
         js = LogPanel.js()
         assert "removeChild" in js, (
@@ -200,6 +200,114 @@ class TestLogPanel:
         assert "logContent.scrollTop = logContent.scrollHeight" in js, (
             "appendLog must auto-scroll the log panel to the bottom after each "
             "new entry; without it the panel stops following live log output."
+        )
+
+    def test_js_auto_scroll_gated_on_scroll_position(self):
+        """appendLog must only auto-scroll when the user is already near the bottom.
+
+        Previously appendLog unconditionally set scrollTop = scrollHeight on every
+        incoming log event, yanking the viewport to the bottom while the user
+        scrolled up to re-read earlier entries. The fix gates the scroll behind a
+        nearBottom check: scrollTop + clientHeight >= scrollHeight - 4. When the
+        user has scrolled up, the scroll must not fire — instead the jump button
+        is revealed so the user can return to live output in one click. A
+        regression that removes the guard would restore the viewport-yank; the
+        - 4 tolerance is the observable near-bottom boundary.
+        """
+        js = LogPanel.js()
+        assert "scrollHeight - 4" in js, (
+            "appendLog must use a near-bottom tolerance (scrollHeight - 4) to "
+            "decide whether auto-scroll is allowed."
+        )
+        assert "clientHeight" in js, (
+            "The near-bottom check must use clientHeight so it works regardless "
+            "of the panel's rendered height."
+        )
+        assert "nearBottom" in js, (
+            "The scroll-position gate must be an observable named condition so "
+            "the auto-scroll branch is distinguishable from unconditional scroll."
+        )
+
+    def test_html_contains_jump_to_latest_button(self):
+        """LogPanel.html() must contain a jump-to-latest button inside the panel.
+
+        When the user scrolls up to read earlier log entries, a sticky
+        'Jump to latest' button (id='btn-scroll-bottom') lets them return to
+        live output in one click without manually scrolling back down. The
+        button is hidden by default via the .hidden class and appears only
+        when appendLog detects the user is away from the bottom. The id must be
+        in REQUIRED_HTML_IDS so validate() catches its removal.
+        """
+        html = LogPanel.html()
+        div_open = html.find('<div id="log-content"')
+        btn_pos = html.find('id="btn-scroll-bottom"')
+        div_close = html.find('</div>', div_open)
+        assert div_open != -1 and div_open < btn_pos < div_close, (
+            "The jump button must live inside the log-content scroll container: "
+            "only as a child of that element does position: sticky pin it to the "
+            "bottom of the panel's own viewport while earlier lines scroll past."
+        )
+        assert 'id="btn-scroll-bottom"' in html, (
+            "LogPanel HTML must contain a button with id='btn-scroll-bottom' "
+            "so users can return to live output after scrolling up."
+        )
+        assert "hidden" in html, (
+            "The jump button must be hidden by default via the .hidden class; "
+            "it only appears when the user has scrolled away from the bottom."
+        )
+        assert "btn-scroll-bottom" in LogPanel.REQUIRED_HTML_IDS, (
+            "btn-scroll-bottom must be in REQUIRED_HTML_IDS so validate() "
+            "catches its removal from the markup."
+        )
+
+    def test_js_wires_jump_button_click_handler(self):
+        """btn-scroll-bottom must register a click handler that scrolls to bottom.
+
+        Clicking the jump button must set scrollTop to scrollHeight (returning
+        the user to live output) and add the hidden class so the button hides
+        itself. Without the handler the button would be a dead control. The
+        click handler must reference btn-scroll-bottom by id so it binds to
+        the actual panel button, not a stray element.
+        """
+        js = LogPanel.js()
+        assert "btn-scroll-bottom" in js, (
+            "The jump button click handler must reference the button by its "
+            "element id to bind to the correct DOM node."
+        )
+        assert "addEventListener" in js, (
+            "The jump button must register a click event listener so the "
+            "button is interactive when shown."
+        )
+        assert "classList" in js, (
+            "The handler must toggle the hidden class so the button hides "
+            "itself after the user returns to live output."
+        )
+
+    def test_css_sticky_jump_button(self):
+        """The jump button must be sticky-positioned so it stays visible at the
+        bottom of the scroll viewport while the user reads earlier entries.
+
+        position: sticky with bottom: 8px keeps the button pinned to the bottom
+        of the log-content scroll container — visible whenever the user has
+        scrolled up, never overlapping the latest line. The .hidden rule must
+        set display: none so the button is invisible until the user scrolls
+        away from the bottom.
+        """
+        css = LogPanel.css()
+        assert ".btn-scroll-bottom" in css, (
+            "LogPanel CSS must style the jump-to-latest button."
+        )
+        assert "position: sticky" in css, (
+            "The jump button must use position: sticky so it stays pinned to "
+            "the bottom of the scroll viewport when the user has scrolled up."
+        )
+        assert "bottom: 8px" in css, (
+            "The sticky button must be offset 8px from the bottom so it does "
+            "not overlap the newest log line."
+        )
+        assert ".btn-scroll-bottom.hidden" in css, (
+            "The .hidden modifier must set display: none so the button is "
+            "invisible while the user is at the bottom."
         )
 
 
