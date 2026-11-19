@@ -8,7 +8,7 @@ to improve maintainability and reduce code duplication.
 class LogPanel:
     """Log panel component for displaying generation logs."""
 
-    REQUIRED_HTML_IDS = ("log-panel", "log-content", "log-count", "btn-clear-logs")
+    REQUIRED_HTML_IDS = ("log-panel", "log-content", "log-count", "btn-clear-logs", "btn-scroll-bottom")
 
     @classmethod
     def validate(cls) -> None:
@@ -37,7 +37,9 @@ class LogPanel:
       <span id="log-count" class="log-count">0</span>
       <button id="btn-clear-logs" class="btn-small btn-secondary" onclick="event.preventDefault(); clearLogs();">Clear</button>
     </summary>
-    <div id="log-content" class="log-content"></div>
+    <div id="log-content" class="log-content">
+      <button id="btn-scroll-bottom" class="btn-scroll-bottom hidden">Jump to latest</button>
+    </div>
   </details>'''
 
     @staticmethod
@@ -54,7 +56,9 @@ class LogPanel:
     .log-line { color: #aaa; white-space: pre-wrap; word-break: break-all; }
     .log-line .timestamp { color: #6af; margin-right: 8px; }
     .log-line.error { color: #f88; }
-    .log-line.warning { color: #fa0; }'''
+    .log-line.warning { color: #fa0; }
+    .btn-scroll-bottom { position: sticky; bottom: 8px; margin-top: 8px; padding: 4px 12px; background: #4a9eff; color: #fff; border: none; border-radius: 12px; font-size: 11px; cursor: pointer; }
+    .btn-scroll-bottom.hidden { display: none; }'''
 
     @staticmethod
     def js() -> str:
@@ -80,12 +84,21 @@ class LogPanel:
     logLineCount++;
     if (logCount) logCount.textContent = logLineCount;
 
-    // Auto-scroll to bottom
-    logContent.scrollTop = logContent.scrollHeight;
+    // Auto-scroll to bottom only while the user is already near the bottom
+    const nearBottom = logContent.scrollTop + logContent.clientHeight >= logContent.scrollHeight - 4;
+    const jumpBtn = document.getElementById('btn-scroll-bottom');
+    if (nearBottom) {
+      logContent.scrollTop = logContent.scrollHeight;
+      if (jumpBtn) jumpBtn.classList.add('hidden');
+    } else if (jumpBtn) {
+      jumpBtn.classList.remove('hidden');
+    }
 
-    // Trim old lines if too many
+    // Trim old lines if too many — target log lines only, never the jump button
     while (logContent.children.length > MAX_LOG_LINES) {
-      logContent.removeChild(logContent.firstChild);
+      const oldest = logContent.querySelector('.log-line');
+      if (!oldest) break;
+      logContent.removeChild(oldest);
       logLineCount--;
     }
   }
@@ -96,11 +109,27 @@ class LogPanel:
     return div.innerHTML;
   }
 
+  const scrollBottomBtn = document.getElementById('btn-scroll-bottom');
+  if (scrollBottomBtn) {
+    scrollBottomBtn.addEventListener('click', function() {
+      const logContent = document.getElementById('log-content');
+      if (logContent) {
+        logContent.scrollTop = logContent.scrollHeight;
+      }
+      this.classList.add('hidden');
+    });
+  }
+
   window.clearLogs = function() {
     const logContent = document.getElementById('log-content');
     const logCount = document.getElementById('log-count');
+    const jumpBtn = document.getElementById('btn-scroll-bottom');
     if (logContent) {
       logContent.innerHTML = '';
+      if (jumpBtn) {
+        logContent.appendChild(jumpBtn);
+        jumpBtn.classList.add('hidden');
+      }
       logLineCount = 0;
       if (logCount) logCount.textContent = '0';
     }
