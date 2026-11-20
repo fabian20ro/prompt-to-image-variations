@@ -326,6 +326,21 @@ def test_hash_prompt_binds_temperature():
     assert h_cold != h_hot
 
 
+def test_hash_prompt_binds_canvas_dimensions():
+    """Changing the canvas width or height must change the cache hash.
+
+    The grammar cache key includes the canvas dimensions because a grammar
+    generated for one canvas must not be reused for another: a new canvas
+    is a new generation, not a cache hit.
+    """
+    h_default = hash_prompt("a cat")
+    h_wide = hash_prompt("a cat", width=1152)
+    h_tall = hash_prompt("a cat", height=864)
+    assert h_default != h_wide
+    assert h_default != h_tall
+    assert h_wide != h_tall
+
+
 # ---------------------------------------------------------------------------
 # get_system_prompt — explicit path, non-default location
 # ---------------------------------------------------------------------------
