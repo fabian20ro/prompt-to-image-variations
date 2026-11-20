@@ -66,8 +66,8 @@ class TestRunFullPipeline:
         """Test full pipeline without image generation.
 
         Verifies progress callback sequence ordering, metadata structure content,
-        and prompt file naming conventions to catch regressions in flow logic
-        rather than just the success flag.
+        and prompt file naming and content conventions to catch regressions in
+        flow logic rather than just the success flag.
         """
         mock_grammar.return_value = ('{"origin": ["test"]}', False, "raw response")
         mock_tracery.return_value = ["prompt 1", "prompt 2", "prompt 3"]
@@ -114,9 +114,14 @@ class TestRunFullPipeline:
         assert expand_start_call[2] == 3  # total should match count
 
         # Verify prompt files were created with correct naming convention (numbered prompts)
-        expected_prompt_files = [result.output_dir / f"test_{i}.txt" for i in range(3)]
-        for expected_file in expected_prompt_files:
+        # and that each file contains its own expanded prompt verbatim
+        expected_prompts = ["prompt 1", "prompt 2", "prompt 3"]
+        for i in range(3):
+            expected_file = result.output_dir / f"test_{i}.txt"
             assert expected_file.exists(), f"Expected file {expected_file.name} not found"
+            assert expected_file.read_text() == expected_prompts[i], (
+                f"Expected {expected_file.name} to contain {expected_prompts[i]!r}"
+            )
 
         # Verify metadata file content structure
         import json as _json
