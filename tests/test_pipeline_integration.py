@@ -101,6 +101,40 @@ def test_run_from_grammar_picks_up_raw_response_sidecar(mock_grammar_file, tmp_p
     assert mock_gallery.call_args.kwargs["raw_response_file"] == "image_raw_response.txt"
 
 
+def test_run_from_grammar_fallback_metaprompt(mock_grammar_file, tmp_path):
+    """run_from_grammar falls back to a directory metaprompt when no exact match exists.
+
+    The seam looks up {stem}.metaprompt.json first; when that is absent it
+    falls back to a metaprompt in the grammar directory and recovers the
+    original user prompt from it. If the fallback is dropped the re-imported
+    run still succeeds, but the persisted metadata and the gallery title
+    silently degrade to the "unknown" placeholder — no existing assertion
+    catches that.
+    """
+    (mock_grammar_file.parent / "test.metaprompt.json").unlink()
+    (mock_grammar_file.parent / "notes.metaprompt.json").write_text(
+        '{"user_prompt": "a whale"}'
+    )
+
+    output_dir = tmp_path / "output"
+
+    with patch("pipeline.create_gallery") as mock_gallery, \
+         patch("pipeline.generate_master_index"), \
+         patch("pipeline.append_grammar_revision"), \
+         patch("pipeline.run_tracery", return_value=["a whale, expanded"]):
+        result = PipelineExecutor().run_from_grammar(
+            mock_grammar_file,
+            count=1,
+            output_dir=output_dir,
+        )
+
+    assert result.success is True
+    metadata = json.loads((output_dir / "image.metaprompt.json").read_text())
+    assert metadata["user_prompt"] == "a whale"
+    # The gallery must render the recovered prompt, not the "unknown" placeholder.
+    assert mock_gallery.call_args.kwargs["user_prompt"] == "a whale"
+
+
 def test_run_from_grammar_text_invalid_grammar_returns_error(tmp_path):
     """Invalid Tracery grammar should produce a failed PipelineResult with an error message."""
     executor = PipelineExecutor()
