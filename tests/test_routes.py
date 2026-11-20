@@ -425,6 +425,23 @@ class TestSavedFileEndpoint:
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/png"
 
+    def test_saved_file_path_traversal_rejected(self, client, temp_dir):
+        """Test that path traversal via symlink is rejected with 403.
+
+        Symlinks are used because HTTP clients (requests) normalize '..' segments
+        out of URLs before they reach the framework. A symlink inside saved/
+        pointing outside forces resolve() to escape the directory at filesystem level,
+        triggering the security guard in routes.py.
+        """
+        saved_dir = temp_dir / "saved"
+        escape_target = temp_dir / "escape_file.png"
+        escape_target.write_text("should not be served")
+
+        os.symlink(escape_target, saved_dir / "link_to_escape")
+
+        response = client.get("/saved/link_to_escape")
+        assert response.status_code == 403
+        assert "Access denied" in response.json()["detail"]
 
 
 class TestArchiveGalleryEndpoint:
