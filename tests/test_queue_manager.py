@@ -134,6 +134,53 @@ class TestQueueManager:
         assert state.completed[0].status == TaskStatus.FAILED
         assert state.completed[0].error == "Something went wrong"
 
+    def test_complete_task_emits_task_completed_event(self, queue_path):
+        """complete_task should emit a task_completed event carrying the task id and result."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+        task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test"})
+        qm.get_next_task()
+
+        # Ignore notifications from add/get.
+        events.clear()
+
+        qm.complete_task(task.id, {"generated": 5})
+
+        # Exactly one event: the task_completed notification carrying the outcome.
+        assert len(events) == 1
+        assert events[0][0] == "task_completed"
+        assert events[0][1]["task_id"] == task.id
+        assert events[0][1]["result"] == {"generated": 5}
+
+    def test_fail_task_emits_task_failed_event(self, queue_path):
+        """fail_task should emit a task_failed event carrying the task id and error text."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+        task = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "test"})
+        qm.get_next_task()
+
+        # Ignore notifications from add/get.
+        events.clear()
+
+        qm.fail_task(task.id, "Something went wrong")
+
+        # Exactly one event: the task_failed notification carrying the error
+        # reason that the UI renders after the SSE task_failed event.
+        assert len(events) == 1
+        assert events[0][0] == "task_failed"
+        assert events[0][1]["task_id"] == task.id
+        assert events[0][1]["error"] == "Something went wrong"
+
     def test_complete_task_caps_completed_history(self, queue_path):
         """The completed history should retain only the newest 50 tasks, newest first."""
         qm = QueueManager(queue_path)
