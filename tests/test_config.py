@@ -499,6 +499,24 @@ class TestConfig:
             assert settings.lm_studio.base_url == LMStudioConfig.base_url
             assert settings.server.sse_timeout == ServerConfig.sse_timeout
 
+    def test_get_env_int_returns_default_when_key_absent(self):
+        """Test that an absent int env var returns the caller-supplied default.
+
+        Mirrors test_get_env_float_returns_default_when_key_absent: an unset key is
+        healthy input and must silently return the provided default. The None branch
+        of _get_env_int is only exercised incidentally elsewhere (via from_env with a
+        cleared environment), where no assertion observes the int fallback, so a
+        regression returning a wrong fallback value or logging a spurious warning for
+        every healthy unset key would slip through the suite.
+        """
+        from config import _get_env_int, logger
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(logger, "warning") as mock_warn:
+            result = _get_env_int("PROMPT_GEN_DEFAULT_WIDTH", 864)
+            assert result == 864
+            mock_warn.assert_not_called()
+
 
 class TestEnvVarDocs:
     """Tests for ENV_VAR_DOCS documentation dictionary and format_env_docs helper.
