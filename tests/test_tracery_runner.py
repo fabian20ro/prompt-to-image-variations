@@ -143,6 +143,15 @@ class TestGenerateOne:
         result = generate_one(grammar)
         assert result == "leaf and leaf"
 
+    def test_generate_preserves_double_period_inside_curly_quotes(self):
+        """Curly-quoted text keeps exact punctuation while outside dots collapse."""
+        grammar = {
+            "origin": ["#line# He said “Hold on.. a moment..” and left."],
+            "line": ["Once again."],
+        }
+        result = generate_one(grammar)
+        assert result == "Once again. He said “Hold on.. a moment..” and left."
+
 
 class TestRunTracery:
     """Tests for batch text generation."""

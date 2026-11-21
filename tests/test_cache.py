@@ -6,11 +6,13 @@ from src.grammar_generator import (
     cache_grammar,
     generate_grammar,
     get_cached_grammar,
+    get_cached_metadata,
     get_cached_raw_response,
     hash_prompt,
     clean_grammar_output,
     validate_grammar_structure,
 )
+from datetime import datetime
 from config import settings
 
 def test_grammar_cache_lifecycle(tmp_path, monkeypatch):
@@ -461,6 +463,48 @@ def test_get_cached_raw_response_hit():
         retrieved = get_cached_raw_response(prompt_hash)
 
     assert retrieved == raw_content
+
+
+def test_get_cached_metadata_hit(tmp_path, monkeypatch):
+    """Metadata round-trip: every provenance field written by cache_grammar is read back."""
+    mock_cache_dir = tmp_path / "grammars"
+    mock_cache_dir.mkdir()
+    monkeypatch.setattr("src.grammar_generator.CACHE_DIR", mock_cache_dir)
+
+    prompt_hash = "metadata_hit_test"
+    user_prompt = "a red fox on snow"
+
+    cache_grammar(prompt_hash, '{"origin": ["#a#"]}', '```json\n{"origin": ["#a#"]}\n```', user_prompt)
+
+    metadata = get_cached_metadata(prompt_hash)
+
+    assert metadata["user_prompt"] == user_prompt
+    assert metadata["hash"] == prompt_hash
+    assert metadata["prompt_schema"] == grammar_gen.PROMPT_SCHEMA_VERSION
+    assert metadata["lm_model"] == settings.lm_studio.model
+    # created_at is present and parseable as ISO-8601
+    datetime.fromisoformat(metadata["created_at"])
+
+
+def test_get_cached_metadata_missing_returns_none(tmp_path, monkeypatch):
+    """No metadata file for the hash: returns None without raising."""
+    mock_cache_dir = tmp_path / "grammars"
+    mock_cache_dir.mkdir()
+    monkeypatch.setattr("src.grammar_generator.CACHE_DIR", mock_cache_dir)
+
+    assert get_cached_metadata("nonexistent_hash") is None
+
+
+def test_get_cached_metadata_corrupt_json_returns_none(tmp_path, monkeypatch):
+    """Unparseable metadata must degrade to None, matching the resilient read pattern of the sibling getters."""
+    mock_cache_dir = tmp_path / "grammars"
+    mock_cache_dir.mkdir()
+    monkeypatch.setattr("src.grammar_generator.CACHE_DIR", mock_cache_dir)
+
+    prompt_hash = "corrupt_metadata_test"
+    (mock_cache_dir / f"{prompt_hash}.metaprompt.json").write_text("{not valid json")
+
+    assert get_cached_metadata(prompt_hash) is None
 
 
 def test_cache_grammar_overwrite(tmp_path, monkeypatch):

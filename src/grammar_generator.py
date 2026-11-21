@@ -176,6 +176,26 @@ def get_cached_raw_response(prompt_hash: str) -> str | None:
     return None
 
 
+def get_cached_metadata(prompt_hash: str) -> dict | None:
+    """
+    Get the provenance metadata from cache for the given prompt hash.
+
+    Args:
+        prompt_hash: The hash of the user prompt
+
+    Returns:
+        The cached metadata dict (user_prompt, created_at, hash,
+        prompt_schema, lm_model), or None if not cached or unparseable
+    """
+    metadata_file = CACHE_DIR / f"{prompt_hash}.metaprompt.json"
+    if metadata_file.exists():
+        try:
+            return json.loads(metadata_file.read_text())
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
 def generate_grammar(
     user_prompt: str,
     base_url: str = LM_STUDIO_BASE_URL,
