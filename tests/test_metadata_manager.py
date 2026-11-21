@@ -601,6 +601,29 @@ class TestConvenienceFunctions:
         assert result is not None
         assert result.exists()
 
+    def test_save_metadata_returns_none_on_failure(self, temp_dir):
+        """Test that save_metadata swallows save failures and returns None.
+
+        The convenience wrapper documents "Path to saved file, or None if
+        save failed": when the atomic swap fails (OSError from os.replace),
+        the error must be swallowed into a None return for backwards-
+        compatible callers, and the failed save must not leave a final
+        .metaprompt.json file behind. A refactor that re-raises the
+        MetadataError, or that writes the final path before the swap,
+        would fail here.
+        """
+        from unittest.mock import patch as mock_patch
+
+        data = {"prefix": "test", "count": 5}
+
+        with mock_patch(
+            "metadata_manager.os.replace", side_effect=OSError("disk full")
+        ):
+            result = save_metadata(temp_dir, data, "test")
+
+        assert result is None
+        assert not (temp_dir / "test.metaprompt.json").exists()
+
     def test_get_metadata_prefix(self, temp_dir):
         """Test get_metadata_prefix convenience function."""
         (temp_dir / "myprefix.metaprompt.json").write_text('{"prefix": "myprefix"}')

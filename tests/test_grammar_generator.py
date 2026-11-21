@@ -805,5 +805,52 @@ class TestGrammarStructureValidation(unittest.TestCase):
             })
 
 
+class TestGrammarStructureValidationLenient(unittest.TestCase):
+    """Tests for validate_grammar_structure(require_variation=False).
+
+    Lenient mode is the production contract for pre-authored grammars:
+    src/tracery_runner.py validates them with require_variation=False.
+    It relaxes only the 5-7 variation contract; structural safety
+    checks must still run in both modes.
+    """
+
+    def test_accepts_varying_rule_with_two_to_four_alternatives(self):
+        # A pre-authored grammar with 4 alternatives is valid for the runner;
+        # a regression that enforces the 5-7 range in lenient mode would
+        # raise here and break validation of existing grammars.
+        validate_grammar_structure(
+            {
+                "origin": ["A #subject#."],
+                "subject": ["fox", "owl", "hare", "badger"],
+            },
+            require_variation=False,
+        )
+
+    def test_accepts_locked_only_grammar(self):
+        # A grammar with only locked (single-option) rules has no variation;
+        # lenient mode must accept it instead of raising the strict-mode
+        # "at least one varying rule" error.
+        validate_grammar_structure(
+            {
+                "origin": ["A fixed prompt."],
+                "style": ["bold"],
+            },
+            require_variation=False,
+        )
+
+    def test_still_rejects_missing_references(self):
+        # require_variation relaxes the variation contract only; an
+        # unresolved reference is a structural failure in both modes and
+        # must still be rejected.
+        with self.assertRaisesRegex(ValueError, "missing rules: subject"):
+            validate_grammar_structure(
+                {
+                    "origin": ["A #subject#."],
+                    "color": ["red", "blue", "green", "yellow", "black"],
+                },
+                require_variation=False,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

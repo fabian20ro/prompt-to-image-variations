@@ -667,6 +667,18 @@ class TestEnhanceAllImagesRequest:
 class TestGenerateFromGrammarRequestValidation:
     """Tests for GenerateFromGrammarRequest field validation."""
 
+    def test_generate_from_grammar_request_grammar_min_length(self):
+        """Test that grammar respects min_length=2 on GenerateFromGrammarRequest."""
+        from pydantic import ValidationError
+
+        # Boundary: 1 character is rejected (min_length=2)
+        with pytest.raises(ValidationError):
+            GenerateFromGrammarRequest(grammar="x")
+
+        # Boundary: exactly 2 characters is allowed
+        req = GenerateFromGrammarRequest(grammar="{}")
+        assert req.grammar == "{}"
+
     def test_generate_from_grammar_request_images_per_prompt_bounds(self):
         """Test that images_per_prompt must be within 0-100 (ge=0, le=100)."""
         from pydantic import ValidationError

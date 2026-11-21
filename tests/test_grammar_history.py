@@ -193,6 +193,27 @@ class TestAppendGrammarRevision:
         path = _history_path(run_dir, "test")
         assert path.exists()
 
+    def test_appended_revision_created_at_is_iso8601(self, run_dir):
+        """Appended entries must carry a UI-parseable created_at timestamp.
+
+        Same contract as the load fallback entry (see
+        test_falls_back_to_current_grammar_when_no_history_file): the GET
+        /api/gallery/{run_id}/grammar/history endpoint returns entries verbatim
+        (src/server/routes.py) and the gallery UI renders new Date(entry.created_at)
+        (src/gallery.py). Existing append tests only assert len/action/grammar,
+        so a non-ISO or missing created_at on produced entries would still pass
+        them while surfacing as "Invalid Date" to the user.
+        """
+        history = append_grammar_revision(
+            run_dir, "test",
+            grammar='{"origin": ["a"]}', action="update",
+        )
+        entry = history[-1]
+        assert isinstance(entry["id"], str) and entry["id"]
+        created_at = entry["created_at"]
+        assert isinstance(created_at, str)
+        datetime.fromisoformat(created_at)
+
 
 class TestLoadGrammarHistoryEdgeCases:
     def test_valid_empty_list_returns_as_is_without_fallback(self, run_dir):
