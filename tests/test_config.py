@@ -499,6 +499,48 @@ class TestConfig:
             assert settings.lm_studio.base_url == LMStudioConfig.base_url
             assert settings.server.sse_timeout == ServerConfig.sse_timeout
 
+    def test_get_env_int_returns_default_when_key_absent(self):
+        """Test that an absent int env var returns the caller-supplied default.
+
+        Mirrors test_get_env_float_returns_default_when_key_absent: an unset key is
+        healthy input and must silently return the provided default. The None branch
+        of _get_env_int is only exercised incidentally elsewhere (via from_env with a
+        cleared environment), where no assertion observes the int fallback, so a
+        regression returning a wrong fallback value or logging a spurious warning for
+        every healthy unset key would slip through the suite.
+        """
+        from config import _get_env_int, logger
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(logger, "warning") as mock_warn:
+            result = _get_env_int("PROMPT_GEN_DEFAULT_WIDTH", 864)
+            assert result == 864
+            mock_warn.assert_not_called()
+
+    def test_non_numeric_int_env_var_falls_back_with_warning(self):
+        """Test that non-numeric int env vars fall back to defaults with exactly one warning.
+
+        Mirrors test_non_numeric_env_float_falls_back_to_default for the int helper: the
+        ValueError branch of _get_env_int must log exactly one warning so an operator
+        mistyping an int env var (e.g. PROMPT_GEN_SSE_QUEUE_SIZE="abc") learns the
+        override was ignored. test_invalid_env_vars observes only the fallback value, so
+        a regression that drops the warning would fall back silently and still pass it.
+        A healthy valid value must be honored without any warning.
+        """
+        from config import _get_env_int, logger, ServerConfig
+
+        with patch.dict(os.environ, {"PROMPT_GEN_SSE_QUEUE_SIZE": "abc"}), \
+             patch.object(logger, "warning") as mock_warn:
+            result = _get_env_int("PROMPT_GEN_SSE_QUEUE_SIZE", ServerConfig.sse_queue_size)
+            assert result == ServerConfig.sse_queue_size
+            mock_warn.assert_called_once()
+
+        with patch.dict(os.environ, {"PROMPT_GEN_SSE_QUEUE_SIZE": "200"}), \
+             patch.object(logger, "warning") as mock_warn:
+            result = _get_env_int("PROMPT_GEN_SSE_QUEUE_SIZE", 100)
+            assert result == 200
+            mock_warn.assert_not_called()
+
 
 class TestEnvVarDocs:
     """Tests for ENV_VAR_DOCS documentation dictionary and format_env_docs helper.
