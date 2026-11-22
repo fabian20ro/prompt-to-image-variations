@@ -103,6 +103,27 @@ def test_generate_image_uses_fixed_sampling_and_explicit_seed(renderer, tmp_path
     assert process.call_args.args[0][-2:] == ["unload", "--all"]
 
 
+@pytest.mark.parametrize("manifest", [None, {"source_revision": "flux3-klein-2026.11.0"}])
+def test_generation_sidecar_records_renderer_provenance(renderer, tmp_path, monkeypatch, manifest):
+    from importlib import metadata
+    original = metadata.version
+    monkeypatch.setattr(metadata, "version",
+                        lambda name: "0.24.0" if name == "mflux" else original(name))
+    if manifest is not None:
+        (tmp_path / "model" / "provenance.json").write_text(json.dumps(manifest))
+    output = generate_image("Cup", tmp_path / "image.png", seed=7, width=128, height=128)
+    saved = json.loads(output.with_suffix(".generation.json").read_text())
+    assert saved["model"] == "flux3-image-klein"
+    assert saved["steps"] == 16
+    assert saved["guidance"] is None
+    assert saved["quantize"] == 4
+    assert saved["variant"] == "distilled-noCFG"
+    assert saved["checkpoint"] == str(tmp_path / "model")
+    assert saved["mflux_version"] == "0.24.0"
+    expected_revision = manifest["source_revision"] if manifest is not None else None
+    assert saved["source_revision"] == expected_revision
+
+
 def test_generate_image_random_seed_uses_full_uint32_range(renderer, tmp_path, monkeypatch):
     random = Mock(return_value=123)
     monkeypatch.setattr("image_generator.random.randint", random)
