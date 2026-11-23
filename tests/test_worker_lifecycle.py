@@ -127,6 +127,44 @@ async def test_default_worker_does_not_kill_long_healthy_batch(queued_worker, mo
 
 
 @pytest.mark.asyncio
+async def test_child_progress_reaches_real_listeners_and_persisted_state(queued_worker):
+    """A child progress line must surface through the public loop as the real SSE event and persisted task progress."""
+    queue, worker, child = queued_worker
+    task = queue.add_task(TaskType.GENERATE_ALL_IMAGES, {})
+
+    async def finish_batch():
+        await child.started.wait()
+        child.stdout.feed_data(
+            b'{"type":"progress","stage":"generating_images","current":1,"total":2,"message":"rendering"}\n'
+        )
+        await asyncio.sleep(0.04)
+        if child.returncode is None:
+            child.result(image_count=2)
+
+    producer = asyncio.create_task(finish_batch())
+    try:
+        events = await run_until_terminal(queue, worker)
+        progress_events = [data for event, data in events if event == "task_progress"]
+        assert progress_events == [
+            {
+                "task_id": task.id,
+                "stage": "generating_images",
+                "current": 1,
+                "total": 2,
+                "message": "rendering",
+            }
+        ]
+        saved = queue.get_task(task.id)
+        assert saved.status == TaskStatus.COMPLETED
+        assert saved.progress.stage == "generating_images"
+        assert saved.progress.current == 1
+        assert saved.progress.total == 2
+    finally:
+        producer.cancel()
+        await asyncio.gather(producer, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_deadline_force_kills_child_that_ignores_termination(queued_worker, monkeypatch):
     queue, worker, child = queued_worker
     task = queue.add_task(TaskType.GENERATE_ALL_IMAGES, {})
