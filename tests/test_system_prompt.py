@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from grammar_generator import get_system_prompt, validate_grammar_structure
+from grammar_generator import get_cached_metadata, get_system_prompt, validate_grammar_structure
 from tracery_runner import run_tracery
 
 
@@ -87,3 +87,17 @@ def test_template_treats_unspecified_traits_as_creative_axes_not_fixed_defaults(
     assert "Without a requested medium, use an ordinary photograph" not in prompt
     assert "Do not vary style unless requested" not in prompt
     assert 'Specific visual direction stays fixed unless the user asks to vary it' in prompt
+
+
+def test_get_cached_metadata_returns_parseable_non_dict_verbatim(tmp_path, monkeypatch):
+    """A metaprompt file holding valid JSON that is not an object is parseable,
+    so get_cached_metadata returns it verbatim: the documented None conditions
+    are only "not cached" or "unparseable"."""
+    mock_cache_dir = tmp_path / "grammars"
+    mock_cache_dir.mkdir()
+    monkeypatch.setattr("grammar_generator.CACHE_DIR", mock_cache_dir)
+
+    prompt_hash = "non_dict_metadata"
+    (mock_cache_dir / f"{prompt_hash}.metaprompt.json").write_text('["origin"]')
+
+    assert get_cached_metadata(prompt_hash) == ["origin"]
