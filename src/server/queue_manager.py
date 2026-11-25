@@ -99,6 +99,7 @@ class QueueManager:
 
             self._notify("queue_updated", {
                 "pending_count": len(state.pending),
+                "completed_count": len(state.completed),
                 "current": state.current_task.model_dump(mode='json') if state.current_task else None,
             })
 
@@ -282,6 +283,7 @@ class QueueManager:
                 self._notify("queue_cleared", {"count": count})
                 self._notify("queue_updated", {
                     "pending_count": len(state.pending),
+                    "completed_count": len(state.completed),
                     "current": state.current_task.model_dump(mode='json') if state.current_task else None,
                 })
 
