@@ -501,6 +501,32 @@ class TestRunGenerateImage:
         assert result["success"] is True
         assert result["data"]["image_path"] == "test_0_0.png"
 
+    @patch("server.worker_subprocess.create_executor")
+    @patch("server.worker_subprocess.set_log_file")
+    @patch("server.worker_subprocess.paths")
+    def test_run_generate_image_gallery_not_found(
+        self, mock_paths, mock_set_log, mock_exec, capsys, temp_dir
+    ):
+        """Test run_generate_image fails cleanly when the gallery directory is missing."""
+        prompts_dir = temp_dir / "prompts"
+        prompts_dir.mkdir(parents=True)
+        mock_paths.prompts_dir = prompts_dir
+
+        run_generate_image({
+            "run_id": "missing-run",
+            "prompt_idx": 0,
+            "image_idx": 0,
+        })
+
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split('\n')
+        result = json.loads(lines[-1])
+
+        assert result["success"] is False
+        assert "Gallery not found" in result["error"]
+        assert "missing-run" in result["error"]
+        mock_exec.assert_not_called()
+
 
 class TestRunEnhanceImage:
     """Tests for run_enhance_image handler."""
