@@ -222,6 +222,23 @@ class TestGetEnhancer:
 
         assert result.tiling_config is original_tiling
 
+    def test_get_enhancer_evicts_stale_model_on_cache_miss(self):
+        """A cache miss evicts the opposite-tiled model before loading the new one."""
+        _enhancer_cache[False] = MagicMock()
+
+        mock_instance = MagicMock()
+        module_seedvr2 = ModuleType("mflux.models.seedvr2.variants.upscale.seedvr2")
+        module_seedvr2.SeedVR2 = MagicMock(return_value=mock_instance)
+
+        with patch.dict(sys.modules, {
+            "mflux.models.seedvr2.variants.upscale.seedvr2": module_seedvr2,
+        }):
+            result = _get_enhancer(tiled_vae=True)
+
+        assert result is mock_instance
+        assert enhancer_is_loaded(tiled_vae=True) is True
+        assert enhancer_is_loaded(tiled_vae=False) is False
+
 
 class TestEnhanceImage:
     """Tests for single image enhancement."""

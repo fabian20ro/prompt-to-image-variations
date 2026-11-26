@@ -440,6 +440,35 @@ class TestUtils:
         # "cat_20240115_143022_10_1.png" is lex-smallest.
         assert archive["first_image"].name == "cat_20240115_143022_10_1.png"
 
+    def test_scan_flat_archives_round_trips_prefixes_with_underscores(self, temp_dir):
+        """Test scan_flat_archives recovers multi-word prefixes containing underscores.
+
+        backup_run names flat files {prefix}_{timestamp}_{promptIdx}_{imgIdx}.png
+        where prefix comes from run metadata and may contain underscores (e.g.
+        "my_cat", like the "camera_study" prefix used elsewhere in the suite).
+        The scanner must capture the full prefix, not only its first
+        underscore-delimited token, or archives would be grouped under a
+        truncated prefix and displayed in the gallery as the wrong archive.
+        """
+        saved_dir = temp_dir / "saved"
+        saved_dir.mkdir()
+
+        img = Image.new('RGB', (10, 10), color='purple')
+        img.save(saved_dir / "my_cat_20240115_143022_0_0.png")
+        img.save(saved_dir / "my_cat_20240115_143022_0_1.png")
+
+        result = scan_flat_archives(saved_dir)
+        assert len(result) == 1
+        archive = result[0]
+        assert archive["prefix"] == "my_cat"
+        assert archive["timestamp"] == "20240115_143022"
+        assert archive["image_count"] == 2
+        assert {p.name for p in archive["images"]} == {
+            "my_cat_20240115_143022_0_0.png",
+            "my_cat_20240115_143022_0_1.png",
+        }
+        assert archive["first_image"].name == "my_cat_20240115_143022_0_0.png"
+
     def test_backup_run_embeds_image_generation_settings(self, temp_dir):
         """Test backup_run embeds image generation settings in PNG text chunks."""
         run_dir = temp_dir / "prompts" / "20240101_120000_abc123"

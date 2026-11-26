@@ -249,6 +249,34 @@ class TestWorkerReadStderr:
         # emit_log should only be called for non-empty lines (2 calls)
         assert worker.queue_manager.emit_log.call_count == 2
 
+    @pytest.mark.asyncio
+    async def test_read_stderr_bounded_to_last_20_lines(self, worker):
+        """The returned diagnostic tail keeps only the 20 most recent lines."""
+        _content = [f"line-{i}\n".encode() for i in range(25)]
+
+        class MockStderr:
+            def __init__(self):
+                self._idx = 0
+
+            async def read(self, size):
+                if self._idx < len(_content):
+                    result = _content[self._idx]
+                    self._idx += 1
+                    return result
+                return b""
+
+        mock_process = MagicMock()
+        mock_process.stderr = MockStderr()
+
+        result = await worker._read_stderr(mock_process, "test-task-id")
+
+        # Bounded tail: 25 lines streamed, only the most recent 20 retained.
+        assert len(result) == 20
+        assert result[0] == "line-5"
+        assert result[-1] == "line-24"
+        # Real-time SSE streaming is unbounded: every line was emitted.
+        assert worker.queue_manager.emit_log.call_count == 25
+
 
 class TestWorkerExecuteTask:
     """Tests for Worker._execute_task() method."""

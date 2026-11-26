@@ -553,6 +553,70 @@ class TestQueueManager:
         assert len(events) == 0  # no spurious task_failed event emitted
 
 
+    def test_add_task_emits_queue_updated_with_completed_count(self, queue_path):
+        """add_task's queue_updated event should include completed_count for a full queue snapshot."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+
+        # Seed two completed tasks: add, start, complete each.
+        first = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "t1"})
+        qm.get_next_task()
+        qm.complete_task(first.id, {"result": "ok"})
+        second = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "t2"})
+        qm.get_next_task()
+        qm.complete_task(second.id, {"result": "ok"})
+
+        state = qm.get_state()
+        assert len(state.completed) == 2
+        assert len(state.pending) == 0
+        assert state.current_task is None
+
+        events.clear()
+        qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "t3"})
+
+        assert len(events) == 1
+        event, data = events[0]
+        assert event == "queue_updated"
+        assert data["completed_count"] == 2
+        assert data["pending_count"] == 1
+        assert data["current"] is None
+        # The payload carries exactly the three snapshot keys; none renamed or removed.
+        assert set(data) == {"pending_count", "completed_count", "current"}
+
+    def test_clear_pending_emits_queue_updated_with_completed_count(self, queue_path):
+        """clear_pending's queue_updated event should also carry completed_count."""
+        qm = QueueManager(queue_path)
+        events = []
+
+        def listener(event, data):
+            events.append((event, data))
+
+        qm.add_listener(listener)
+
+        # Seed one completed task, then two pending tasks.
+        done = qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "t1"})
+        qm.get_next_task()
+        qm.complete_task(done.id, {"result": "ok"})
+        qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "t2"})
+        qm.add_task(TaskType.GENERATE_IMAGE, {"run_id": "t3"})
+
+        events.clear()
+        qm.clear_pending()
+
+        queue_updated = [data for event, data in events if event == "queue_updated"]
+        assert len(queue_updated) == 1
+        data = queue_updated[0]
+        assert data["pending_count"] == 0
+        assert data["completed_count"] == 1
+        assert data["current"] is None
+        assert set(data) == {"pending_count", "completed_count", "current"}
+
+
 class TestGetTask:
     """Tests for QueueManager.get_task lookup."""
 

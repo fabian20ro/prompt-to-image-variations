@@ -71,6 +71,26 @@ def test_generate_image_requires_provisioned_checkpoint(monkeypatch, tmp_path):
         generate_image("Photograph of a cup", tmp_path / "image.png")
 
 
+@pytest.mark.parametrize("quantization_level", ["8", 8])
+def test_checkpoint_rejects_wrong_quantization_level_before_loading(monkeypatch, tmp_path, quantization_level):
+    from image_generator import validate_checkpoint
+    checkpoint = tmp_path / "model"
+    for name in ("transformer", "text_encoder", "vae"):
+        directory = checkpoint / name
+        directory.mkdir(parents=True)
+        (directory / "weights.safetensors").write_bytes(b"fake weights")
+        (directory / "model.safetensors.index.json").write_text(json.dumps({
+            "metadata": {"quantization_level": quantization_level},
+            "weight_map": {"weight": "weights.safetensors"},
+        }))
+    for name in ("tokenizer_config.json", "tokenizer.json"):
+        (checkpoint / "text_encoder" / name).write_text("{}")
+    monkeypatch.setattr(settings, "image_generation", replace(settings.image_generation,
+                       model_path=checkpoint))
+    with pytest.raises(ValueError, match="Invalid FLUX 3 q4 checkpoint"):
+        validate_checkpoint()
+
+
 @pytest.mark.parametrize("width,height", [(-1, 512), (512, 0), (511, 512), (512, 513)])
 def test_generate_image_rejects_invalid_dimensions(tmp_path, width, height):
     with pytest.raises(ValueError):
@@ -101,6 +121,27 @@ def test_generate_image_uses_fixed_sampling_and_explicit_seed(renderer, tmp_path
     assert calls == [{"prompt": "Cup", "seed": 9876, "num_inference_steps": 16, "width": 512, "height": 768}]
     assert json.loads(output.with_suffix(".generation.json").read_text())["seed"] == 9876
     assert process.call_args.args[0][-2:] == ["unload", "--all"]
+
+
+@pytest.mark.parametrize("manifest", [None, {"source_revision": "flux3-klein-2026.11.0"}])
+def test_generation_sidecar_records_renderer_provenance(renderer, tmp_path, monkeypatch, manifest):
+    from importlib import metadata
+    original = metadata.version
+    monkeypatch.setattr(metadata, "version",
+                        lambda name: "0.24.0" if name == "mflux" else original(name))
+    if manifest is not None:
+        (tmp_path / "model" / "provenance.json").write_text(json.dumps(manifest))
+    output = generate_image("Cup", tmp_path / "image.png", seed=7, width=128, height=128)
+    saved = json.loads(output.with_suffix(".generation.json").read_text())
+    assert saved["model"] == "flux3-image-klein"
+    assert saved["steps"] == 16
+    assert saved["guidance"] is None
+    assert saved["quantize"] == 4
+    assert saved["variant"] == "distilled-noCFG"
+    assert saved["checkpoint"] == str(tmp_path / "model")
+    assert saved["mflux_version"] == "0.24.0"
+    expected_revision = manifest["source_revision"] if manifest is not None else None
+    assert saved["source_revision"] == expected_revision
 
 
 def test_generate_image_random_seed_uses_full_uint32_range(renderer, tmp_path, monkeypatch):
